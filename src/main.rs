@@ -8,6 +8,8 @@ pub mod schema;
 pub mod termio;
 pub mod event;
 pub mod epoll;
+pub mod borrowedfd;
+pub mod color;
 
 fn main() -> Result<(), std::io::Error> {
 //    let file = File::open(std::env::args_os().nth(1).unwrap())?;

@@ -1,6 +1,6 @@
-use std::{io::ErrorKind, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
+use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}};
+use crate::{borrowedfd::BorrowedFd, color::{Color, Color16}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -9,6 +9,7 @@ static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
 pub struct TermIO {
     wfd: RawFd,
     rfd: RawFd,
+    writer: BufWriter<BorrowedFd>,
     buffer: Box<[u8]>,
     buffer_size: usize,
     buffer_index: usize,
@@ -17,6 +18,7 @@ pub struct TermIO {
     orig_termios: libc::termios,
     sigwinch_nr: u32,
     epoll: EPoll,
+    mouse_enabled: bool,
 }
 
 const READ_SIZE: usize = 1024;
@@ -82,7 +84,9 @@ impl TermIO {
         }
 
         let mut app = Self {
-            wfd, rfd,
+            wfd,
+            rfd,
+            writer: BufWriter::new(BorrowedFd::new(wfd)),
             buffer: vec![0u8; BUFFER_SIZE].into_boxed_slice(),
             buffer_size: 0,
             buffer_index: 0,
@@ -91,6 +95,7 @@ impl TermIO {
             epoll,
             uint_buffer: Vec::with_capacity(8),
             events: vec![crate::epoll::Event::default(); EPOLL_BUFFER_SIZE].into_boxed_slice(),
+            mouse_enabled: false,
         };
 
         app.epoll.add(rfd, Events::In | Events::ReadHangup, 0)?;
@@ -99,7 +104,8 @@ impl TermIO {
         // CSI ?   25 l   Hide cursor (DECTCEM), VT220
         // CSI ?    7 l   No Auto-Wrap Mode (DECAWM), VT100.
         // CSI 2 J        Clear entire screen
-        //app.write(b"\x1B[?1049h\x1B[?25l\x1B[?7l\x1B[2J")?;
+        app.write(b"\x1B[?1049h\x1B[?25l\x1B[?7l\x1B[2J")?;
+        app.flush()?;
 
         if SIGWINCH_NR.fetch_add(1, Ordering::AcqRel) == 0 {
             let handler = handle_sigwinch as extern "C" fn(libc::c_int);
@@ -126,25 +132,87 @@ impl TermIO {
 
     #[inline]
     pub fn write_str(&mut self, s: &str) -> std::io::Result<()> {
-        self.write(s.as_bytes())
+        self.writer.write_all(s.as_bytes())
     }
 
-    pub fn write(&mut self, mut bytes: &[u8]) -> std::io::Result<()> {
-        while !bytes.is_empty() {
-            let res = unsafe { libc::write(self.wfd, bytes.as_ptr() as * const libc::c_void, bytes.len() )};
+    #[inline]
+    pub fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.writer.write_all(bytes)
+    }
 
-            if res < 0 {
-                let err = std::io::Error::last_os_error();
-                if err.kind() == std::io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(err);
-            }
+    #[inline]
+    pub fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
 
-            bytes = &bytes[res as usize..];
-        }
+    #[inline]
+    pub fn fg_default(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[39m")
+    }
 
-        Ok(())
+    #[inline]
+    pub fn bg_default(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[49m")
+    }
+
+    #[inline]
+    pub fn fg_rgb(&mut self, Color { r, g, b }: Color) -> std::io::Result<()> {
+        write!(self.writer, "\x1B[38;2;{r};{g};{b}m")
+    }
+
+    #[inline]
+    pub fn bg_rgb(&mut self, Color { r, g, b }: Color) -> std::io::Result<()> {
+        write!(self.writer, "\x1B[48;2;{r};{g};{b}m")
+    }
+
+    #[inline]
+    pub fn fg16(&mut self, color: Color16) -> std::io::Result<()> {
+        self.writer.write_all(color.fg())
+    }
+
+    #[inline]
+    pub fn bg16(&mut self, color: Color16) -> std::io::Result<()> {
+        self.writer.write_all(color.bg())
+    }
+
+    #[inline]
+    pub fn normal(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[0m")
+    }
+
+    #[inline]
+    pub fn bold(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[1m")
+    }
+
+    #[inline]
+    pub fn faint(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[2m")
+    }
+
+    #[inline]
+    pub fn italic(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[3m")
+    }
+
+    #[inline]
+    pub fn underline(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[4m")
+    }
+
+    #[inline]
+    pub fn doubly_underline(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[21m")
+    }
+
+    #[inline]
+    pub fn normal_intensity(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[22m")
+    }
+
+    #[inline]
+    pub fn not_underline(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[24m")
     }
 
     pub fn read_byte(&mut self) -> std::io::Result<Option<u8>> {
@@ -245,11 +313,20 @@ impl TermIO {
 
     pub fn enable_mouse(&mut self) -> std::io::Result<()> {
         // https://c-for-dummies.com/blog/?p=7363
-        self.write(b"\x1B[?1000h\x1B[?1003h\x1B[?1006h")
+        self.write(b"\x1B[?1000h\x1B[?1003h\x1B[?1006h")?;
+        self.mouse_enabled = true;
+        Ok(())
     }
 
     pub fn disable_mouse(&mut self) -> std::io::Result<()> {
-        self.write(b"\x1B[?1001l")
+        self.write(b"\x1B[?1001l")?;
+        self.mouse_enabled = false;
+        Ok(())
+    }
+
+    #[inline]
+    pub fn is_mouse_enabled(&self) -> bool {
+        self.mouse_enabled
     }
 
     pub fn wait(&mut self) -> std::io::Result<Option<Event>> {
@@ -636,11 +713,16 @@ impl Drop for TermIO {
     fn drop(&mut self) {
         let _ = unsafe { libc::tcsetattr(self.rfd, libc::TCSANOW, &self.orig_termios) };
 
+        if self.mouse_enabled {
+            let _ = self.disable_mouse();
+        }
+
         // CSI 0 m        Reset or normal, all attributes become turned off
         // CSI ?   25 h   Show cursor (DECTCEM), VT220
         // CSI ?    7 h   Auto-Wrap Mode (DECAWM), VT100
         // CSI ? 1049 l   Disable alternative screen buffer
-        //let _ = self.write(b"\x1B[0m\x1B[?25h\x1B[?7h\x1B[?1049l");
+        let _ = self.write(b"\x1B[0m\x1B[?25h\x1B[?7h\x1B[?1049l");
+        let _ = self.flush();
 
         if self.wfd != libc::STDOUT_FILENO && self.wfd != libc::STDERR_FILENO {
             let _ = unsafe { libc::close(self.wfd) };
@@ -650,4 +732,40 @@ impl Drop for TermIO {
             let _ = unsafe { libc::close(self.rfd) };
         }
     }
+}
+
+unsafe extern "C" {
+    fn wcwidth(ch: libc::wchar_t) -> libc::c_int;
+}
+
+#[inline]
+pub fn wcswidth(s: &str) -> Option<usize> {
+    let mut swidth: usize = 0;
+
+    for ch in s.chars() {
+        let cwidth = unsafe { wcwidth(ch as libc::wchar_t) };
+
+        if cwidth < 0 {
+            return None;
+        }
+
+        swidth += cwidth as usize;
+    }
+
+    Some(swidth)
+}
+
+#[inline]
+pub fn wcswidth_ignore_unprintable(s: &str) -> usize {
+    let mut swidth: usize = 0;
+
+    for ch in s.chars() {
+        let cwidth = unsafe { wcwidth(ch as libc::wchar_t) };
+
+        if cwidth > 0 {
+            swidth += cwidth as usize;
+        }
+    }
+
+    swidth
 }
