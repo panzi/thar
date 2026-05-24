@@ -1,6 +1,6 @@
 use std::{io::ErrorKind, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{epoll::{EPoll, Event, Events}, escape::{ESCAPE, InputSequence}};
+use crate::{epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -12,7 +12,8 @@ pub struct TermIO {
     buffer: Box<[u8]>,
     buffer_size: usize,
     buffer_index: usize,
-    events: Box<[Event]>,
+    uint_buffer: Vec<u32>,
+    events: Box<[crate::epoll::Event]>,
     orig_termios: libc::termios,
     sigwinch_nr: u32,
     epoll: EPoll,
@@ -88,7 +89,8 @@ impl TermIO {
             orig_termios: *orig_termios,
             sigwinch_nr: 0,
             epoll,
-            events: vec![Event::default(); EPOLL_BUFFER_SIZE].into_boxed_slice(),
+            uint_buffer: Vec::with_capacity(8),
+            events: vec![crate::epoll::Event::default(); EPOLL_BUFFER_SIZE].into_boxed_slice(),
         };
 
         app.epoll.add(rfd, Events::In | Events::ReadHangup, 0)?;
@@ -241,13 +243,22 @@ impl TermIO {
         });
     }
 
-    pub fn wait(&mut self) -> std::io::Result<Option<InputSequence>> {
+    pub fn enable_mouse(&mut self) -> std::io::Result<()> {
+        // https://c-for-dummies.com/blog/?p=7363
+        self.write(b"\x1B[?1000h\x1B[?1003h\x1B[?1006h")
+    }
+
+    pub fn disable_mouse(&mut self) -> std::io::Result<()> {
+        self.write(b"\x1B[?1001l")
+    }
+
+    pub fn wait(&mut self) -> std::io::Result<Option<Event>> {
         let sigwinch_nr = SIGWINCH_NR.load(Ordering::Relaxed);
         if self.sigwinch_nr != sigwinch_nr {
             self.sigwinch_nr = sigwinch_nr;
 
             let winsize = self.window_size()?;
-            return Ok(Some(InputSequence::WindowSize {
+            return Ok(Some(Event::WindowSize {
                 rows: winsize.rows,
                 columns: winsize.columns,
             }));
@@ -279,7 +290,7 @@ impl TermIO {
                             self.sigwinch_nr = sigwinch_nr;
 
                             let winsize = self.window_size()?;
-                            return Ok(Some(InputSequence::WindowSize {
+                            return Ok(Some(Event::WindowSize {
                                 rows: winsize.rows,
                                 columns: winsize.columns,
                             }));
@@ -292,149 +303,198 @@ impl TermIO {
         }
     }
 
-    pub fn read(&mut self) -> std::io::Result<Option<InputSequence>> {
-        loop {
-            let sigwinch_nr = SIGWINCH_NR.load(Ordering::Relaxed);
-            if self.sigwinch_nr != sigwinch_nr {
-                self.sigwinch_nr = sigwinch_nr;
+    fn parse_utf8(&mut self, byte: u8) -> std::io::Result<Option<char>> {
+        if byte >= 0xC0 {
+            let mut codepoint: u32 = byte.into();
+            // UTF-8 multi-byte sequence
 
-                let winsize = self.window_size()?;
-                return Ok(Some(InputSequence::WindowSize {
-                    rows: winsize.rows,
-                    columns: winsize.columns,
-                }));
-            }
+            if byte >= 0xF0 {
+                // 4 bytes
+                codepoint &= 0x07;
 
-            let Some(byte) = self.read_byte()? else {
-                return Ok(None);
-            };
+                let b2 = self.peek_byte()?;
 
-            if byte != ESCAPE {
-                // parse UTF-8
-                if byte >= 0xC0 {
-                    let mut codepoint: u32 = byte.into();
-                    // UTF-8 multi-byte sequence
+                if let Some(b2) = b2 && is_cont(b2) {
+                    self.buffer_index += 1;
 
-                    if byte >= 0xF0 {
-                        // 4 bytes
-                        codepoint &= 0x07;
+                    let b3 = self.peek_byte()?;
 
-                        let b2 = self.peek_byte()?;
+                    if let Some(b3) = b3 && is_cont(b3) {
+                        self.buffer_index += 1;
 
-                        if let Some(b2) = b2 && is_cont(b2) {
-                            self.buffer_index += 1;
+                        codepoint <<= 6;
+                        codepoint |= b3 as u32 & 0x3F;
 
-                            let b3 = self.peek_byte()?;
+                        let b4 = self.peek_byte()?;
 
-                            if let Some(b3) = b3 && is_cont(b3) {
-                                self.buffer_index += 1;
-
-                                codepoint <<= 6;
-                                codepoint |= b3 as u32 & 0x3F;
-
-                                let b4 = self.peek_byte()?;
-
-                                if let Some(b4) = b4 && is_cont(b4) {
-                                    self.buffer_index += 1;
-
-                                    codepoint <<= 6;
-                                    codepoint |= b4 as u32 & 0x3F;
-
-                                    return Ok(Some(InputSequence::Char(unsafe { char::from_u32_unchecked(codepoint) })));
-                                } else {
-                                    self.unget_slice(&[b2, b3]);
-                                    return Ok(Some(InputSequence::Char(surrogate_escape(byte))));
-                                }
-                            } else {
-                                self.unget_byte(b2);
-                                return Ok(Some(InputSequence::Char(surrogate_escape(byte))));
-                            }
-                        } else {
-                            return Ok(Some(InputSequence::Char(surrogate_escape(byte))));
-                        }
-                    } else if byte >= 0xE0 {
-                        // 3 bytes
-                        codepoint &= 0x0F;
-
-                        let b2 = self.peek_byte()?;
-
-                        if let Some(b2) = b2 && is_cont(b2) {
-                            self.buffer_index += 1;
-
-                            let b3 = self.peek_byte()?;
-
-                            if let Some(b3) = b3 && is_cont(b3) {
-                                self.buffer_index += 1;
-
-                                codepoint <<= 6;
-                                codepoint |= b3 as u32 & 0x3F;
-
-                                return Ok(Some(InputSequence::Char(unsafe { char::from_u32_unchecked(codepoint) })));
-                            } else {
-                                self.unget_byte(b2);
-                                return Ok(Some(InputSequence::Char(surrogate_escape(byte))));
-                            }
-                        } else {
-                            return Ok(Some(InputSequence::Char(surrogate_escape(byte))));
-                        }
-                    } else {
-                        // 2 bytes
-                        codepoint &= 0x1F;
-
-                        let b2 = self.peek_byte()?;
-
-                        if let Some(b2) = b2 && is_cont(b2) {
+                        if let Some(b4) = b4 && is_cont(b4) {
                             self.buffer_index += 1;
 
                             codepoint <<= 6;
-                            codepoint |= b2 as u32 & 0x3F;
+                            codepoint |= b4 as u32 & 0x3F;
 
-                            return Ok(Some(InputSequence::Char(unsafe { char::from_u32_unchecked(codepoint) })));
+                            return Ok(Some(unsafe { char::from_u32_unchecked(codepoint) }));
                         } else {
-                            return Ok(Some(InputSequence::Char(surrogate_escape(byte))));
+                            self.unget_slice(&[b2, b3]);
+                            return Ok(Some(surrogate_escape(byte)));
                         }
+                    } else {
+                        self.unget_byte(b2);
+                        return Ok(Some(surrogate_escape(byte)));
                     }
+                } else {
+                    return Ok(Some(surrogate_escape(byte)));
                 }
+            } else if byte >= 0xE0 {
+                // 3 bytes
+                codepoint &= 0x0F;
 
-                return Ok(Some(InputSequence::Char(byte.into())));
+                let b2 = self.peek_byte()?;
+
+                if let Some(b2) = b2 && is_cont(b2) {
+                    self.buffer_index += 1;
+
+                    let b3 = self.peek_byte()?;
+
+                    if let Some(b3) = b3 && is_cont(b3) {
+                        self.buffer_index += 1;
+
+                        codepoint <<= 6;
+                        codepoint |= b3 as u32 & 0x3F;
+
+                        return Ok(Some(unsafe { char::from_u32_unchecked(codepoint) }));
+                    } else {
+                        self.unget_byte(b2);
+                        return Ok(Some(surrogate_escape(byte)));
+                    }
+                } else {
+                    return Ok(Some(surrogate_escape(byte)));
+                }
+            } else {
+                // 2 bytes
+                codepoint &= 0x1F;
+
+                let b2 = self.peek_byte()?;
+
+                if let Some(b2) = b2 && is_cont(b2) {
+                    self.buffer_index += 1;
+
+                    codepoint <<= 6;
+                    codepoint |= b2 as u32 & 0x3F;
+
+                    return Ok(Some(unsafe { char::from_u32_unchecked(codepoint) }));
+                } else {
+                    return Ok(Some(surrogate_escape(byte)));
+                }
             }
+        }
 
-            // else ESC
-            // https://en.wikipedia.org/wiki/ANSI_escape_code#Terminal_input_sequences
+        return Ok(Some(byte.into()));
+    }
 
-            let Some(byte) = self.peek_byte()? else {
-                return Ok(Some(InputSequence::Char(ESCAPE.into())));
+    pub fn read(&mut self) -> std::io::Result<Option<Event>> {
+        let sigwinch_nr = SIGWINCH_NR.load(Ordering::Relaxed);
+        if self.sigwinch_nr != sigwinch_nr {
+            self.sigwinch_nr = sigwinch_nr;
+
+            let winsize = self.window_size()?;
+            return Ok(Some(Event::WindowSize {
+                rows: winsize.rows,
+                columns: winsize.columns,
+            }));
+        }
+
+        let Some(byte) = self.read_byte()? else {
+            return Ok(None);
+        };
+
+        if byte == b'\r' {
+            return Ok(Some(Event::KeyPress { ctrl: false, alt: false, shift: false, key: Key::Enter }));
+        }
+
+        if byte >= 1 && byte <= 26 {
+            return Ok(Some(Event::KeyPress { alt: false, ctrl: true, shift: false, key: Key::Char((b'a' + byte).into()) }));
+        }
+
+        if byte != ESCAPE {
+            let ch = self.parse_utf8(byte)?;
+            return Ok(ch.map(Event::from_char));
+        }
+
+        // else ESC
+        // https://en.wikipedia.org/wiki/ANSI_escape_code#Terminal_input_sequences
+
+        let Some(byte) = self.peek_byte()? else {
+            return Ok(Some(ESCAPE_EVENT));
+        };
+
+        if byte == b'[' {
+            // CSI
+            self.buffer_index += 1;
+
+            let Some(mut byte) = self.peek_byte()? else {
+                return Ok(Some(Event::alt_key(Key::Char('['))));
             };
 
-            if byte == b'[' {
-                // TODO: more generic list of number parsing
-                self.buffer_index += 1;
+            if byte == ESCAPE {
+                // guess this is a new escape sequence and it was just Alt+[
+                return Ok(Some(Event::alt_key(Key::Char('['))));
+            }
 
-                let Some(mut byte) = self.peek_byte()? else {
-                    // ignore unsupported escape sequence
-                    continue;
-                };
-
-                let private = byte == b'?';
-                if private {
+            match byte {
+                b'A' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Up))); }
+                b'B' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Down))); }
+                b'C' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Right))); }
+                b'D' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Left))); }
+                b'F' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::End))); }
+                b'E' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Keypad5))); }
+                b'G' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Keypad5))); }
+                b'H' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Home))); }
+                b'P' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Pause))); }
+                b'[' => { // '\x1B[['
                     self.buffer_index += 1;
 
                     let Some(next) = self.peek_byte()? else {
-                        // ignore unsupported escape sequence
-                        continue;
+                        self.unget_byte(b'[');
+                        return Ok(Some(Event::alt_key(Key::Char('['))));
                     };
 
-                    byte = next;
+                    match next {
+                        b'A' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(1)))); }
+                        b'B' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(2)))); }
+                        b'C' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(3)))); }
+                        b'D' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(4)))); }
+                        b'E' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(5)))); }
+                        _ => { return Ok(Some(Event::Unsupported)); }
+                    }
                 }
+                _ => {}
+            }
 
-                let mut modifier: u32 = 1;
+            let flag = if byte == b'?' || byte == b'<' {
+                let flag = byte;
+                self.buffer_index += 1;
 
-                if byte.is_ascii_digit() {
-                    modifier = 0;
+                let Some(next) = self.peek_byte()? else {
+                    return Ok(Some(Event::Unsupported));
+                };
+
+                byte = next;
+
+                flag
+            } else {
+                0
+            };
+
+            if byte.is_ascii_digit() {
+                self.uint_buffer.clear();
+
+                loop {
+                    let mut uint: u32 = 0;
                     while byte.is_ascii_digit() {
                         // check for integer overflow?
-                        modifier *= 10;
-                        modifier += (byte - b'0') as u32;
+                        uint *= 10;
+                        uint += (byte - b'0') as u32;
 
                         self.buffer_index += 1;
                         let Some(next) = self.peek_byte()? else {
@@ -443,86 +503,115 @@ impl TermIO {
 
                         byte = next;
                     }
-                }
 
-                if byte == b';' {
+                    self.uint_buffer.push(uint);
+
+                    if byte != b';' {
+                        break;
+                    }
+
                     self.buffer_index += 1;
-
-                    let key_code = modifier;
-                    modifier = 1;
-
                     let Some(next) = self.peek_byte()? else {
-                        // ignore unsupported escape sequence
-                        continue;
+                        break;
                     };
 
                     byte = next;
-
-                    if byte.is_ascii_digit() {
-                        modifier = 0;
-                        while byte.is_ascii_digit() {
-                            // check for integer overflow?
-                            modifier *= 10;
-                            modifier += (byte - b'0') as u32;
-
-                            self.buffer_index += 1;
-                            let Some(next) = self.peek_byte()? else {
-                                break;
-                            };
-
-                            byte = next;
-                        }
-                    }
-
-                    if byte != b'~' {
-                        // ignore unsupported escape sequence
-                        continue;
-                    }
-
-                    self.buffer_index += 1;
-
-                    if private {
-                        if byte == b'R' {
-                            return Ok(Some(InputSequence::CursorPos { row: key_code, column: modifier }))
-                        }
-
-                        // ignore unsupported escape sequence
-                        continue;
-                    }
-
-                    return Ok(Some(InputSequence::KeyCode { key_code, modifier }));
-
                 }
-
-                if byte == ESCAPE {
-                    // ignore unsupported escape sequence
-                    continue;
-                }
-
-                self.buffer_index += 1;
-
-                if private {
-                    // ignore unsupported escape sequence
-                    continue;
-                }
-
-                return Ok(Some(InputSequence::Modifier { modifier, char: byte.into() }));
-            }
-
-            if byte == b'O' {
-                // SS3
-                self.buffer_index += 1;
-
-                let Some(next) = self.read_byte()? else {
-                    return Ok(Some(InputSequence::Alt(byte.into())));
-                };
-
-                return Ok(Some(InputSequence::SingleShift3(next.into())));
             }
 
             self.buffer_index += 1;
-            return Ok(Some(InputSequence::Alt(byte.into())));
+
+            match (flag, byte, self.uint_buffer.len()) {
+                (0, b'~', 0) => {
+                    // no number defaults to 1
+                    return Ok(Some(Event::key(Key::Home)));
+                }
+                (0, b'~', 1) => {
+                    match self.uint_buffer[0] {
+                        2 => { return Ok(Some(Event::key(Key::Insert))); }
+                        3 => { return Ok(Some(Event::key(Key::Delete))); }
+                        4 => { return Ok(Some(Event::key(Key::End))); }
+                        5 => { return Ok(Some(Event::key(Key::PageUp))); }
+                        6 => { return Ok(Some(Event::key(Key::PageDown))); }
+                        7 => { return Ok(Some(Event::key(Key::Home))); }
+                        8 => { return Ok(Some(Event::key(Key::End))); }
+
+                        15 => { return Ok(Some(Event::key(Key::Function(5)))); }
+
+                        17 => { return Ok(Some(Event::key(Key::Function(6)))); }
+                        18 => { return Ok(Some(Event::key(Key::Function(7)))); }
+                        19 => { return Ok(Some(Event::key(Key::Function(8)))); }
+                        20 => { return Ok(Some(Event::key(Key::Function(9)))); }
+                        21 => { return Ok(Some(Event::key(Key::Function(10)))); }
+
+                        23 => { return Ok(Some(Event::key(Key::Function(11)))); }
+                        24 => { return Ok(Some(Event::key(Key::Function(12)))); }
+                        25 => { return Ok(Some(Event::key(Key::Function(13)))); }
+                        26 => { return Ok(Some(Event::key(Key::Function(14)))); }
+
+                        28 => { return Ok(Some(Event::key(Key::Function(15)))); }
+                        29 => { return Ok(Some(Event::key(Key::Function(16)))); }
+
+                        31 => { return Ok(Some(Event::key(Key::Function(17)))); }
+                        32 => { return Ok(Some(Event::key(Key::Function(18)))); }
+                        33 => { return Ok(Some(Event::key(Key::Function(19)))); }
+                        34 => { return Ok(Some(Event::key(Key::Function(20)))); }
+
+                        _ => {
+                            return Ok(Some(Event::Unsupported));
+                        }
+                    }
+                }
+                (b'<', b'M', 3) | (b'<', b'm', 3) => {
+                    // mouse
+                    let _release = byte == b'm';
+                    let _buttons = self.uint_buffer[0];
+                    let _column = self.uint_buffer[1];
+                    let _row = self.uint_buffer[2];
+
+                    // TODO: mouse support
+                    return Ok(Some(Event::Unsupported));
+                }
+                (0, b'R', 2) | (b'?', b'R', 2) => {
+                    return Ok(Some(Event::CursorPosition { row: self.uint_buffer[0], column: self.uint_buffer[1] }));
+                }
+                _ => {
+                    return Ok(Some(Event::Unsupported));
+                }
+            }
+        } else if byte == b'O' {
+            // SS3
+            self.buffer_index += 1;
+
+            let Some(next) = self.read_byte()? else {
+                return Ok(Some(Event::KeyPress { alt: true, ctrl: false, shift: true, key: Key::Char('O') }));
+            };
+
+            match next {
+                b'P' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(1)))); }
+                b'Q' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(2)))); }
+                b'R' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(3)))); }
+                b'S' => { self.buffer_index += 1; return Ok(Some(Event::key(Key::Function(4)))); }
+                b'M' => { self.buffer_index += 1; return Ok(Some(Event::KeyPress { ctrl: false, alt: false, shift: true, key: Key::Enter })); }
+                _ => {}
+            }
         }
+
+        self.buffer_index += 1;
+
+        if byte == ESCAPE && let Some(next) = self.peek_byte()? && next == b'O' {
+            self.buffer_index += 1;
+
+            if let Some(next) = self.peek_byte()? && next == b'M' {
+                self.buffer_index += 1;
+                return Ok(Some(Event::KeyPress { ctrl: false, alt: true, shift: true, key: Key::Enter }));
+            } else {
+                return Ok(Some(Event::Unsupported));
+            }
+        }
+
+        let ch = self.parse_utf8(byte)?;
+        return Ok(ch.map(Event::from_char_alt));
     }
 }
 

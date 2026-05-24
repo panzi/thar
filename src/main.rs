@@ -2,11 +2,11 @@
 //
 //use crate::schema::HAR;
 
-use crate::escape::{ESCAPE, InputSequence};
+use crate::event::{Event, Key};
 
 pub mod schema;
 pub mod termio;
-pub mod escape;
+pub mod event;
 pub mod epoll;
 
 fn main() -> Result<(), std::io::Error> {
@@ -17,10 +17,10 @@ fn main() -> Result<(), std::io::Error> {
 
     let mut app = termio::TermIO::from_stdio()?;
 
-    while let Some(seq) = app.wait()? {
-        println!("{seq:?}");
+    while let Some(event) = app.wait()? {
+        println!("{event}");
 
-        if seq == InputSequence::Char(ESCAPE.into()) {
+        if matches!(event, Event::KeyPress { key: Key::Escape, alt: false, ctrl: false, shift: false }) {
             break;
         }
     }
