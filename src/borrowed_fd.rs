@@ -32,6 +32,13 @@ impl From<BorrowedFd> for RawFd {
     }
 }
 
+impl From<RawFd> for BorrowedFd {
+    #[inline]
+    fn from(value: RawFd) -> Self {
+        Self(value)
+    }
+}
+
 impl std::io::Write for BorrowedFd {
     #[inline]
     fn flush(&mut self) -> std::io::Result<()> {

@@ -65,15 +65,35 @@ impl Color16 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Color {
+pub struct Rgb {
     pub r: u8,
     pub g: u8,
     pub b: u8,
 }
 
-impl Color {
+impl Rgb {
     #[inline]
     pub fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Color {
+    Rgb { r: u8, g: u8, b: u8 },
+    Color16(Color16),
+}
+
+impl From<Rgb> for Color {
+    #[inline]
+    fn from(Rgb { r, g, b }: Rgb) -> Self {
+        Self::Rgb { r, g, b }
+    }
+}
+
+impl From<Color16> for Color {
+    #[inline]
+    fn from(color16: Color16) -> Self {
+        Self::Color16(color16)
     }
 }

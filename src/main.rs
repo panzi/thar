@@ -1,29 +1,54 @@
-//use std::{fs::File, io::BufReader};
-//
-//use crate::schema::HAR;
+use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::event::{Event, Key};
+use crate::{event::{Event, Key}, schema::HAR};
+
+use clap::Parser;
 
 pub mod schema;
 pub mod termio;
 pub mod event;
 pub mod epoll;
-pub mod borrowedfd;
+pub mod borrowed_fd;
 pub mod color;
+pub mod char_width;
+pub mod widgets;
+
+#[derive(Parser)]
+struct Args {
+    path: Option<OsString>,
+}
 
 fn main() -> Result<(), std::io::Error> {
-//    let file = File::open(std::env::args_os().nth(1).unwrap())?;
-//    let har: HAR = serde_json::from_reader(BufReader::new(file))?;
-//
-//    println!("{har:#?}");
+//  println!("{har:#?}");
+    let args = Args::parse();
+
+    let har: HAR = if let Some(path) = args.path {
+        let file = File::open(path)?;
+        serde_json::from_reader(BufReader::new(file))?
+    } else {
+        serde_json::from_reader(std::io::stdin())?
+    };
 
     let mut app = termio::TermIO::from_stdio()?;
+    let mut size = app.window_size()?;
 
     while let Some(event) = app.wait()? {
-        println!("{event}");
 
-        if matches!(event, Event::KeyPress { key: Key::Escape, alt: false, ctrl: false, shift: false }) {
-            break;
+        //println!("{event}");
+
+        match event {
+            Event::WindowSize { rows, columns } => {
+                if rows != size.rows || columns != size.columns {
+                    // full redraw
+
+                    size.rows = rows;
+                    size.columns = columns;
+                }
+            }
+            Event::KeyPress { key: Key::Char('q'), alt: false, ctrl: false, shift: false } => {
+                break;
+            }
+            _ => {}
         }
     }
 

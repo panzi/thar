@@ -1,6 +1,6 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowedfd::BorrowedFd, color::{Color, Color16}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}};
+use crate::{borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -156,12 +156,12 @@ impl TermIO {
     }
 
     #[inline]
-    pub fn fg_rgb(&mut self, Color { r, g, b }: Color) -> std::io::Result<()> {
+    pub fn fg_rgb(&mut self, Rgb { r, g, b }: Rgb) -> std::io::Result<()> {
         write!(self.writer, "\x1B[38;2;{r};{g};{b}m")
     }
 
     #[inline]
-    pub fn bg_rgb(&mut self, Color { r, g, b }: Color) -> std::io::Result<()> {
+    pub fn bg_rgb(&mut self, Rgb { r, g, b }: Rgb) -> std::io::Result<()> {
         write!(self.writer, "\x1B[48;2;{r};{g};{b}m")
     }
 
@@ -173,6 +173,22 @@ impl TermIO {
     #[inline]
     pub fn bg16(&mut self, color: Color16) -> std::io::Result<()> {
         self.writer.write_all(color.bg())
+    }
+
+    #[inline]
+    pub fn fg(&mut self, color: Color) -> std::io::Result<()> {
+        match color {
+            Color::Rgb { r, g, b } => self.fg_rgb(Rgb { r, g, b }),
+            Color::Color16(color) => self.fg16(color),
+        }
+    }
+
+    #[inline]
+    pub fn bg(&mut self, color: Color) -> std::io::Result<()> {
+        match color {
+            Color::Rgb { r, g, b } => self.bg_rgb(Rgb { r, g, b }),
+            Color::Color16(color) => self.bg16(color),
+        }
     }
 
     #[inline]
@@ -213,6 +229,51 @@ impl TermIO {
     #[inline]
     pub fn not_underline(&mut self) -> std::io::Result<()> {
         self.writer.write_all(b"\x1B[24m")
+    }
+
+    #[inline]
+    pub fn move_cursor(&mut self, row: u32, column: u32) -> std::io::Result<()> {
+        write!(self.writer, "\x1B[{row};{column}H")
+    }
+
+    #[inline]
+    pub fn move_cursor_up(&mut self, amount: u32) -> std::io::Result<()> {
+        write!(self.writer, "\x1B[{amount}A")
+    }
+
+    #[inline]
+    pub fn move_cursor_down(&mut self, amount: u32) -> std::io::Result<()> {
+        write!(self.writer, "\x1B[{amount}B")
+    }
+
+    #[inline]
+    pub fn move_cursor_forward(&mut self, amount: u32) -> std::io::Result<()> {
+        write!(self.writer, "\x1B[{amount}C")
+    }
+
+    #[inline]
+    pub fn move_cursor_back(&mut self, amount: u32) -> std::io::Result<()> {
+        write!(self.writer, "\x1B[{amount}D")
+    }
+
+    #[inline]
+    pub fn clear_screen(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[2J")
+    }
+
+    #[inline]
+    pub fn clear_line(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[2K")
+    }
+
+    #[inline]
+    pub fn clear_line_to_end(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[0K")
+    }
+
+    #[inline]
+    pub fn clear_line_to_start(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[1K")
     }
 
     pub fn read_byte(&mut self) -> std::io::Result<Option<u8>> {
@@ -732,40 +793,4 @@ impl Drop for TermIO {
             let _ = unsafe { libc::close(self.rfd) };
         }
     }
-}
-
-unsafe extern "C" {
-    fn wcwidth(ch: libc::wchar_t) -> libc::c_int;
-}
-
-#[inline]
-pub fn wcswidth(s: &str) -> Option<usize> {
-    let mut swidth: usize = 0;
-
-    for ch in s.chars() {
-        let cwidth = unsafe { wcwidth(ch as libc::wchar_t) };
-
-        if cwidth < 0 {
-            return None;
-        }
-
-        swidth += cwidth as usize;
-    }
-
-    Some(swidth)
-}
-
-#[inline]
-pub fn wcswidth_ignore_unprintable(s: &str) -> usize {
-    let mut swidth: usize = 0;
-
-    for ch in s.chars() {
-        let cwidth = unsafe { wcwidth(ch as libc::wchar_t) };
-
-        if cwidth > 0 {
-            swidth += cwidth as usize;
-        }
-    }
-
-    swidth
 }
