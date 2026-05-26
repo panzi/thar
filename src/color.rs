@@ -76,12 +76,59 @@ impl Rgb {
     pub fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
+
+    #[inline]
+    pub fn from_u32(color: u32) -> Self {
+        Self {
+            r: ((color >> 16) & 0xFF) as u8,
+            g: ((color >>  0) & 0xFF) as u8,
+            b: (color         & 0xFF) as u8,
+        }
+    }
+
+    #[inline]
+    pub fn to_u32(&self) -> u32 {
+        ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
+    }
+}
+
+impl From<u32> for Rgb {
+    #[inline]
+    fn from(value: u32) -> Self {
+        Self::from_u32(value)
+    }
+}
+
+impl From<Rgb> for u32 {
+    #[inline]
+    fn from(value: Rgb) -> Self {
+        value.to_u32()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
+    Default,
     Rgb { r: u8, g: u8, b: u8 },
     Color16(Color16),
+}
+
+impl Color {
+    #[inline]
+    pub fn from_u32(color: u32) -> Self {
+        Self::Rgb {
+            r: ((color >> 16) & 0xFF) as u8,
+            g: ((color >>  0) & 0xFF) as u8,
+            b: (color         & 0xFF) as u8,
+        }
+    }
+}
+
+impl Default for Color {
+    #[inline]
+    fn default() -> Self {
+        Self::Default
+    }
 }
 
 impl From<Rgb> for Color {

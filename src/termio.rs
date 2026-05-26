@@ -1,6 +1,6 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}};
+use crate::{borrowed_fd::BorrowedFd, char_width::CharWidth, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -19,6 +19,7 @@ pub struct TermIO {
     sigwinch_nr: u32,
     epoll: EPoll,
     mouse_enabled: bool,
+    window_size: WindowSize,
 }
 
 const READ_SIZE: usize = 1024;
@@ -29,11 +30,14 @@ extern "C" fn handle_sigwinch(_: libc::c_int) {
     SIGWINCH_NR.fetch_add(1, Ordering::AcqRel);
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct WindowSize {
     pub rows: u32,
     pub columns: u32,
 }
+
+pub const FG_DEFAULT: &[u8] = b"\x1B[39m";
+pub const BG_DEFAULT: &[u8] = b"\x1B[49m";
 
 impl TermIO {
     #[inline]
@@ -96,6 +100,7 @@ impl TermIO {
             uint_buffer: Vec::with_capacity(8),
             events: vec![crate::epoll::Event::default(); EPOLL_BUFFER_SIZE].into_boxed_slice(),
             mouse_enabled: false,
+            window_size: WindowSize::default(),
         };
 
         app.epoll.add(rfd, Events::In | Events::ReadHangup, 0)?;
@@ -106,6 +111,7 @@ impl TermIO {
         // CSI 2 J        Clear entire screen
         app.write(b"\x1B[?1049h\x1B[?25l\x1B[?7l\x1B[2J")?;
         app.flush()?;
+        app.refresh_window_size()?;
 
         if SIGWINCH_NR.fetch_add(1, Ordering::AcqRel) == 0 {
             let handler = handle_sigwinch as extern "C" fn(libc::c_int);
@@ -141,18 +147,85 @@ impl TermIO {
     }
 
     #[inline]
+    fn line(&mut self, row: i32, mut column: i32, line: &str) -> std::io::Result<()> {
+        if row < 1 || row as u32 > self.window_size.rows {
+            return Ok(());
+        }
+
+        let mut iter = line.chars().map(|c|
+            if c < '\x1F' { (1, true, unsafe { char::from_u32_unchecked(0x2400 + c as u32) }) }
+            else if c == '\x7F' { (1, true, '\u{2421}') }
+            else { (c.char_width_ignore_unprintable(), false, c) });
+
+        while column < 1 {
+            let Some((w, _, _)) = iter.next() else {
+                break;
+            };
+
+            // TODO: check integer overflow?
+            column += w as i32;
+        }
+
+        if column < 1 {
+            // end of string reached before moved far enough
+            return Ok(());
+        }
+
+        self.move_cursor(row as u32, column as u32)?;
+
+        let mut buf = [0u8; 4];
+        while (column as u32) < self.window_size.columns {
+            let Some((w, special, c)) = iter.next() else {
+                break;
+            };
+
+            let s = c.encode_utf8(&mut buf).as_bytes();
+
+            if special {
+                self.fg16(Color16::Magenta)?;
+                self.writer.write_all(s)?;
+                self.fg_default()?;
+            } else {
+                self.writer.write_all(s)?;
+            }
+
+            // TODO: check integer overflow?
+            column += w as i32;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn text(&mut self, mut row: i32, column: i32, text: &str) -> std::io::Result<()> {
+        if column > 0 && column as u32 > self.window_size.columns {
+            return Ok(());
+        }
+
+        for line in text.split('\n') {
+            if row > 0 && row as u32 > self.window_size.rows {
+                break;
+            }
+            self.line(row, column, line)?;
+            row += 1;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
     pub fn flush(&mut self) -> std::io::Result<()> {
         self.writer.flush()
     }
 
     #[inline]
     pub fn fg_default(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[39m")
+        self.writer.write_all(FG_DEFAULT)
     }
 
     #[inline]
     pub fn bg_default(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[49m")
+        self.writer.write_all(BG_DEFAULT)
     }
 
     #[inline]
@@ -178,6 +251,7 @@ impl TermIO {
     #[inline]
     pub fn fg(&mut self, color: Color) -> std::io::Result<()> {
         match color {
+            Color::Default => self.fg_default(),
             Color::Rgb { r, g, b } => self.fg_rgb(Rgb { r, g, b }),
             Color::Color16(color) => self.fg16(color),
         }
@@ -186,6 +260,7 @@ impl TermIO {
     #[inline]
     pub fn bg(&mut self, color: Color) -> std::io::Result<()> {
         match color {
+            Color::Default => self.bg_default(),
             Color::Rgb { r, g, b } => self.bg_rgb(Rgb { r, g, b }),
             Color::Color16(color) => self.bg16(color),
         }
@@ -212,6 +287,11 @@ impl TermIO {
     }
 
     #[inline]
+    pub fn not_italic(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(b"\x1B[23m")
+    }
+
+    #[inline]
     pub fn underline(&mut self) -> std::io::Result<()> {
         self.writer.write_all(b"\x1B[4m")
     }
@@ -229,6 +309,53 @@ impl TermIO {
     #[inline]
     pub fn not_underline(&mut self) -> std::io::Result<()> {
         self.writer.write_all(b"\x1B[24m")
+    }
+
+    pub fn font_weight(&mut self, font_weight: FontWeight) -> std::io::Result<()> {
+        match font_weight {
+            FontWeight::Normal => self.normal_intensity(),
+            FontWeight::Bold => self.bold(),
+            FontWeight::Faint => self.faint(),
+        }
+    }
+
+    pub fn text_decoration(&mut self, text_decoration: TextDecoration) -> std::io::Result<()> {
+        match text_decoration {
+            TextDecoration::None => self.not_underline(),
+            TextDecoration::Underline => self.underline(),
+            TextDecoration::DoublyUnderline => self.doubly_underline(),
+        }
+    }
+
+    pub fn font_style(&mut self, font_style: FontStyle) -> std::io::Result<()> {
+        match font_style {
+            FontStyle::Normal => self.not_italic(),
+            FontStyle::Italic => self.italic(),
+        }
+    }
+
+    pub fn text_style(&mut self, style: &TextStyle) -> std::io::Result<()> {
+        if let Some(font_weight) = style.font_weight {
+            self.font_weight(font_weight)?;
+        }
+
+        if let Some(text_decoration) = style.text_decoration {
+            self.text_decoration(text_decoration)?;
+        }
+
+        if let Some(font_style) = style.font_style {
+            self.font_style(font_style)?;
+        }
+
+        if let Some(fg) = style.foreground {
+            self.fg(fg)?;
+        }
+
+        if let Some(bg) = style.background {
+            self.fg(bg)?;
+        }
+
+        Ok(())
     }
 
     #[inline]
@@ -353,7 +480,12 @@ impl TermIO {
         }
     }
 
-    pub fn window_size(&mut self) -> std::io::Result<WindowSize> {
+    #[inline]
+    pub fn window_size(&self) -> &WindowSize {
+        &self.window_size
+    }
+
+    pub fn refresh_window_size(&mut self) -> std::io::Result<&WindowSize> {
         let mut winsize = libc::winsize {
             ws_row: 0,
             ws_col: 0,
@@ -366,10 +498,12 @@ impl TermIO {
             return Err(std::io::Error::last_os_error());
         }
 
-        return Ok(WindowSize {
+        self.window_size = WindowSize {
             rows: winsize.ws_row.into(),
             columns: winsize.ws_col.into(),
-        });
+        };
+
+        return Ok(&self.window_size);
     }
 
     pub fn enable_mouse(&mut self) -> std::io::Result<()> {
@@ -395,11 +529,14 @@ impl TermIO {
         if self.sigwinch_nr != sigwinch_nr {
             self.sigwinch_nr = sigwinch_nr;
 
-            let winsize = self.window_size()?;
-            return Ok(Some(Event::WindowSize {
-                rows: winsize.rows,
-                columns: winsize.columns,
-            }));
+            let old_window_size = self.window_size;
+            let new_window_size = self.refresh_window_size()?;
+            if *new_window_size != old_window_size {
+                return Ok(Some(Event::WindowSize {
+                    rows: new_window_size.rows,
+                    columns: new_window_size.columns,
+                }));
+            }
         }
 
         loop {
@@ -427,11 +564,14 @@ impl TermIO {
                         if self.sigwinch_nr != sigwinch_nr {
                             self.sigwinch_nr = sigwinch_nr;
 
-                            let winsize = self.window_size()?;
-                            return Ok(Some(Event::WindowSize {
-                                rows: winsize.rows,
-                                columns: winsize.columns,
-                            }));
+                            let old_window_size = self.window_size;
+                            let new_window_size = self.refresh_window_size()?;
+                            if *new_window_size != old_window_size {
+                                return Ok(Some(Event::WindowSize {
+                                    rows: new_window_size.rows,
+                                    columns: new_window_size.columns,
+                                }));
+                            }
                         }
                     } else {
                         return Err(err);
@@ -535,11 +675,14 @@ impl TermIO {
         if self.sigwinch_nr != sigwinch_nr {
             self.sigwinch_nr = sigwinch_nr;
 
-            let winsize = self.window_size()?;
-            return Ok(Some(Event::WindowSize {
-                rows: winsize.rows,
-                columns: winsize.columns,
-            }));
+            let old_window_size = self.window_size;
+            let new_window_size = self.refresh_window_size()?;
+            if *new_window_size != old_window_size {
+                return Ok(Some(Event::WindowSize {
+                    rows: new_window_size.rows,
+                    columns: new_window_size.columns,
+                }));
+            }
         }
 
         let Some(byte) = self.read_byte()? else {
