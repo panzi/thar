@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
+use crate::{char_width::CharWidth, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
 
 /// Simple rich text format, a bit like BB code.
 /// 
@@ -16,173 +16,275 @@ use crate::{color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecorati
 /// * `[[` a single open bracket (`[`)
 /// * `]]` a single close bracket (`]`)
 #[derive(Debug)]
-pub struct RichText(Vec<RichTextCode>);
+pub struct RichText {
+    rich_text: Vec<RichTextCode>,
+    lines: usize,
+    width: usize,
+}
 
 impl RichText {
-    pub fn parse(style: &RichTextStyle, rich_text: &str) -> Result<Self, ParseError> {
-        let mut current_style = *style;
+    pub fn from_plain_text(toplevel_style: &RichTextStyle, control_style: &RichTextStyle, plain_text: &str) -> Self {
+        let mut code = Vec::new();
+        let mut lines = 1;
+        let mut width = 0;
+        let mut line_width = 0;
+
+        let mut prev_index = 0;
+
+        for (index, ch) in plain_text.char_indices() {
+            if ch.is_ascii_control() {
+                if prev_index < index {
+                    let text = &plain_text[prev_index..index];
+                    line_width += text.char_width_ignore_unprintable();
+                    code.push(RichTextCode::Text(text.to_string()));
+                }
+
+                if ch == '\n' {
+                    if ch == '\n' {
+                        code.push(RichTextCode::Newline);
+                        if line_width > width {
+                            width = line_width;
+                        }
+                        line_width = 0;
+                        lines += 1;
+                    } else {
+                        line_width += 1;
+                        toplevel_style.diff(control_style, &mut code);
+                        code.push(RichTextCode::Text(
+                            if ch == '\x7F' {
+                                "\u{2421}".to_string()
+                            } else {
+                                unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }.to_string()
+                            }
+                        ));
+                        control_style.diff(toplevel_style, &mut code);
+                    }
+                }
+
+                prev_index = index;
+            }
+        }
+
+        if prev_index < plain_text.len() {
+            let text = &plain_text[prev_index..];
+            line_width += text.char_width_ignore_unprintable();
+            if line_width > width {
+                width = line_width;
+            }
+            code.push(RichTextCode::Text(text.to_string()));
+        }
+
+        Self {
+            rich_text: code,
+            lines,
+            width,
+        }
+    }
+
+    pub fn parse(toplevel_style: &RichTextStyle, control_style: &RichTextStyle, rich_text: &str) -> Result<Self, ParseError> {
+        let mut current_style = *toplevel_style;
         let mut stack: Vec<(Tag, RichTextStyle)> = Vec::new();
         let mut code = Vec::new();
 
         let mut index = 0;
         let mut buf = String::new();
 
-        while index < rich_text.len() {
+        let mut lines = 1;
+        let mut width = 0;
+        let mut line_width = 0;
+
+        'outer: while index < rich_text.len() {
             let old_index = index;
 
-            let Some(bracket_index) = rich_text[index..].find(|c| c == '[' || c == ']') else {
-                buf.push_str(&rich_text[old_index..]);
-                break;
-            };
-            let bracket_index = bracket_index + index;
+            for (char_index, ch) in rich_text[index..].char_indices() {
+                if ch == '[' || ch == ']' {
+                    index += char_index;
 
-            index = bracket_index + 1;
+                    buf.push_str(&rich_text[old_index..index]);
 
-            buf.push_str(&rich_text[old_index..bracket_index]);
+                    let new_index = index + 1;
 
-            if rich_text[bracket_index..].starts_with(']') {
-                if !rich_text[index..].starts_with(']') {
-                    return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
-                }
+                    if ch == ']' {
+                        if !rich_text[new_index..].starts_with(']') {
+                            return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
+                        }
 
-                buf.push(']');
+                        buf.push(']');
 
-                index += 1;
-            } else if rich_text[index..].starts_with('[') {
-                buf.push('[');
+                        index = new_index + 1;
+                    } else if rich_text[new_index..].starts_with('[') {
+                        buf.push('[');
 
-                index += 1;
-            } else {
-                if !buf.is_empty() {
-                    code.push(RichTextCode::Text(buf.clone()));
-                    buf.clear();
-                }
+                        index = new_index + 1;
+                    } else {
+                        index = new_index;
 
-                let is_end_tag = if rich_text[index..].starts_with('/') {
-                    index += 1;
-                    true
-                } else {
-                    false
-                };
+                        if !buf.is_empty() {
+                            line_width += buf.char_width_ignore_unprintable();
+                            code.push(RichTextCode::Text(buf.clone()));
+                            buf.clear();
+                        }
 
-                let end_index = if let Some(end_index) = rich_text[index..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
-                    index + end_index
-                } else {
-                    rich_text.len()
-                };
+                        let is_end_tag = if rich_text[index..].starts_with('/') {
+                            index += 1;
+                            true
+                        } else {
+                            false
+                        };
 
-                if end_index == index {
-                    return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
-                }
+                        let end_index = if let Some(end_index) = rich_text[index..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+                            index + end_index
+                        } else {
+                            rich_text.len()
+                        };
 
-                let tag_name = &rich_text[index..end_index];
+                        if end_index == index {
+                            return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
+                        }
 
-                let Some(tag) = Tag::from_tag_name(tag_name) else {
-                    return Err(ParseError::new(ParseErrorKind::UnknownTag, index, rich_text));
-                };
+                        let tag_name = &rich_text[index..end_index];
 
-                index = end_index;
+                        let Some(tag) = Tag::from_tag_name(tag_name) else {
+                            return Err(ParseError::new(ParseErrorKind::UnknownTag, index, rich_text));
+                        };
 
-                if is_end_tag {
-                    let Some((old_tag, old_style)) = stack.pop() else {
-                        return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: None }, index, rich_text));
-                    };
+                        index = end_index;
 
-                    if old_tag != tag {
-                        return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: Some(old_tag) }, index, rich_text));
+                        if is_end_tag {
+                            let Some((old_tag, old_style)) = stack.pop() else {
+                                return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: None }, index, rich_text));
+                            };
+
+                            if old_tag != tag {
+                                return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: Some(old_tag) }, index, rich_text));
+                            }
+
+                            match tag {
+                                Tag::Bold | Tag::Faint => {
+                                    if current_style.font_weight != old_style.font_weight {
+                                        code.push(RichTextCode::FontWeight(old_style.font_weight));
+                                        current_style.font_weight = old_style.font_weight;
+                                    }
+                                }
+                                Tag::Italic => {
+                                    if current_style.font_style != old_style.font_style {
+                                        code.push(RichTextCode::FontStyle(old_style.font_style));
+                                        current_style.font_style = old_style.font_style;
+                                    }
+                                }
+                                Tag::Underline | Tag::DoublyUnderline => {
+                                    if current_style.text_decoration != old_style.text_decoration {
+                                        code.push(RichTextCode::TextDecoration(old_style.text_decoration));
+                                        current_style.text_decoration = old_style.text_decoration;
+                                    }
+                                }
+                                Tag::Foreground => {
+                                    if current_style.foreground != old_style.foreground {
+                                        code.push(RichTextCode::Foreground(old_style.foreground));
+                                        current_style.foreground = old_style.foreground;
+                                    }
+                                }
+                                Tag::Background => {
+                                    if current_style.background != old_style.background {
+                                        code.push(RichTextCode::Background(old_style.background));
+                                        current_style.background = old_style.background;
+                                    }
+                                }
+                            }
+                        } else {
+                            stack.push((tag, current_style));
+
+                            match tag {
+                                Tag::Bold => {
+                                    if current_style.font_weight != FontWeight::Bold {
+                                        code.push(RichTextCode::FontWeight(FontWeight::Bold));
+                                        current_style.font_weight = FontWeight::Bold;
+                                    }
+                                }
+                                Tag::Faint => {
+                                    if current_style.font_weight != FontWeight::Faint {
+                                        code.push(RichTextCode::FontWeight(FontWeight::Faint));
+                                        current_style.font_weight = FontWeight::Faint;
+                                    }
+                                }
+                                Tag::Italic => {
+                                    if current_style.font_style != FontStyle::Italic {
+                                        code.push(RichTextCode::FontStyle(FontStyle::Italic));
+                                        current_style.font_style = FontStyle::Italic;
+                                    }
+                                }
+                                Tag::Underline => {
+                                    if current_style.text_decoration != TextDecoration::Underline {
+                                        code.push(RichTextCode::TextDecoration(TextDecoration::Underline));
+                                        current_style.text_decoration = TextDecoration::Underline;
+                                    }
+                                }
+                                Tag::DoublyUnderline => {
+                                    if current_style.text_decoration != TextDecoration::DoublyUnderline {
+                                        code.push(RichTextCode::TextDecoration(TextDecoration::DoublyUnderline));
+                                        current_style.text_decoration = TextDecoration::DoublyUnderline;
+                                    }
+                                }
+                                Tag::Foreground => {
+                                    let (new_index, color) = parse_color_attr(rich_text, index)?;
+                                    index = new_index;
+                                    if current_style.foreground != color {
+                                        code.push(RichTextCode::Foreground(color));
+                                        current_style.foreground = color;
+                                    }
+                                }
+                                Tag::Background => {
+                                    let (new_index, color) = parse_color_attr(rich_text, index)?;
+                                    index = new_index;
+                                    if current_style.background != color {
+                                        code.push(RichTextCode::Background(color));
+                                        current_style.background = color;
+                                    }
+                                }
+                            }
+                        }
+
+                        if !rich_text[index..].starts_with(']') {
+                            return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
+                        }
+
+                        index += 1;
                     }
 
-                    match tag {
-                        Tag::Bold | Tag::Faint => {
-                            if current_style.font_weight != old_style.font_weight {
-                                code.push(RichTextCode::FontWeight(old_style.font_weight));
-                                current_style.font_weight = old_style.font_weight;
-                            }
-                        }
-                        Tag::Italic => {
-                            if current_style.font_style != old_style.font_style {
-                                code.push(RichTextCode::FontStyle(old_style.font_style));
-                                current_style.font_style = old_style.font_style;
-                            }
-                        }
-                        Tag::Underline | Tag::DoublyUnderline => {
-                            if current_style.text_decoration != old_style.text_decoration {
-                                code.push(RichTextCode::TextDecoration(old_style.text_decoration));
-                                current_style.text_decoration = old_style.text_decoration;
-                            }
-                        }
-                        Tag::Foreground => {
-                            if current_style.foreground != old_style.foreground {
-                                code.push(RichTextCode::Foreground(old_style.foreground));
-                                current_style.foreground = old_style.foreground;
-                            }
-                        }
-                        Tag::Background => {
-                            if current_style.background != old_style.background {
-                                code.push(RichTextCode::Background(old_style.background));
-                                current_style.background = old_style.background;
-                            }
-                        }
+                    continue 'outer;
+                } else if ch.is_ascii_control() {
+                    if !buf.is_empty() {
+                        line_width += buf.char_width_ignore_unprintable();
+                        code.push(RichTextCode::Text(buf.clone()));
+                        buf.clear();
                     }
-                } else {
-                    stack.push((tag, current_style));
 
-                    match tag {
-                        Tag::Bold => {
-                            if current_style.font_weight != FontWeight::Bold {
-                                code.push(RichTextCode::FontWeight(FontWeight::Bold));
-                                current_style.font_weight = FontWeight::Bold;
-                            }
+                    if ch == '\n' {
+                        code.push(RichTextCode::Newline);
+                        if line_width > width {
+                            width = line_width;
                         }
-                        Tag::Faint => {
-                            if current_style.font_weight != FontWeight::Faint {
-                                code.push(RichTextCode::FontWeight(FontWeight::Faint));
-                                current_style.font_weight = FontWeight::Faint;
+                        line_width = 0;
+                        lines += 1;
+                    } else {
+                        line_width += 1;
+                        current_style.diff(control_style, &mut code);
+                        code.push(RichTextCode::Text(
+                            if ch == '\x7F' {
+                                "\u{2421}".to_string()
+                            } else {
+                                unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }.to_string()
                             }
-                        }
-                        Tag::Italic => {
-                            if current_style.font_style != FontStyle::Italic {
-                                code.push(RichTextCode::FontStyle(FontStyle::Italic));
-                                current_style.font_style = FontStyle::Italic;
-                            }
-                        }
-                        Tag::Underline => {
-                            if current_style.text_decoration != TextDecoration::Underline {
-                                code.push(RichTextCode::TextDecoration(TextDecoration::Underline));
-                                current_style.text_decoration = TextDecoration::Underline;
-                            }
-                        }
-                        Tag::DoublyUnderline => {
-                            if current_style.text_decoration != TextDecoration::DoublyUnderline {
-                                code.push(RichTextCode::TextDecoration(TextDecoration::DoublyUnderline));
-                                current_style.text_decoration = TextDecoration::DoublyUnderline;
-                            }
-                        }
-                        Tag::Foreground => {
-                            let (new_index, color) = parse_color_attr(rich_text, index)?;
-                            index = new_index;
-                            if current_style.foreground != color {
-                                code.push(RichTextCode::Foreground(color));
-                                current_style.foreground = color;
-                            }
-                        }
-                        Tag::Background => {
-                            let (new_index, color) = parse_color_attr(rich_text, index)?;
-                            index = new_index;
-                            if current_style.background != color {
-                                code.push(RichTextCode::Background(color));
-                                current_style.background = color;
-                            }
-                        }
+                        ));
+                        control_style.diff(&current_style, &mut code);
                     }
-                }
 
-                if !rich_text[index..].starts_with(']') {
-                    return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
+                    index += char_index + 1;
+                    continue 'outer;
                 }
-
-                index += 1;
             }
+
+            break;
         }
 
         if let Some((tag, _)) = stack.pop() {
@@ -190,20 +292,38 @@ impl RichText {
         }
 
         if !buf.is_empty() {
+            line_width += buf.char_width_ignore_unprintable();
+            if line_width > width {
+                width = line_width;
+            }
             code.push(RichTextCode::Text(buf.clone()));
         }
 
-        Ok(Self(code))
+        Ok(Self {
+            rich_text: code,
+            lines,
+            width,
+        })
     }
 
     #[inline]
-    pub fn inner(&self) -> &[RichTextCode] {
-        &self.0
+    pub fn lines(&self) -> usize {
+        self.lines
+    }
+
+    #[inline]
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    #[inline]
+    pub fn rich_text(&self) -> &[RichTextCode] {
+        &self.rich_text
     }
 
     #[inline]
     pub fn into_inner(self) -> Vec<RichTextCode> {
-        self.0
+        self.rich_text
     }
 }
 
@@ -306,6 +426,11 @@ impl RichTextStyle {
             code.push(RichTextCode::Background(new_style.background));
         }
     }
+
+    #[inline]
+    pub fn build() -> RichTextStyleBuilder {
+        RichTextStyleBuilder::default()
+    }
 }
 
 impl From<&TextStyle> for RichTextStyle {
@@ -321,6 +446,78 @@ impl From<&TextStyle> for RichTextStyle {
     }
 }
 
+impl From<&RichTextStyle> for TextStyle {
+    #[inline]
+    fn from(value: &RichTextStyle) -> Self {
+        Self {
+            font_weight: Some(value.font_weight),
+            text_decoration: Some(value.text_decoration),
+            font_style: Some(value.font_style),
+            foreground: Some(value.foreground),
+            background: Some(value.background),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RichTextStyleBuilder {
+    inner: RichTextStyle
+}
+
+impl RichTextStyleBuilder {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn inner(&self) -> &RichTextStyle {
+        &self.inner
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> RichTextStyle {
+        self.inner
+    }
+
+    #[inline]
+    pub fn font_weight(mut self, font_weight: FontWeight) -> Self {
+        self.inner.font_weight = font_weight;
+        self
+    }
+
+    #[inline]
+    pub fn text_decoration(mut self, text_decoration: TextDecoration) -> Self {
+        self.inner.text_decoration = text_decoration;
+        self
+    }
+
+    #[inline]
+    pub fn font_style(mut self, font_style: FontStyle) -> Self {
+        self.inner.font_style = font_style;
+        self
+    }
+
+    #[inline]
+    pub fn foreground(mut self, foreground: Color) -> Self {
+        self.inner.foreground = foreground;
+        self
+    }
+
+    #[inline]
+    pub fn background(mut self, background: Color) -> Self {
+        self.inner.background = background;
+        self
+    }
+}
+
+impl From<RichTextStyleBuilder> for RichTextStyle {
+    #[inline]
+    fn from(value: RichTextStyleBuilder) -> Self {
+        value.into_inner()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RichTextCode {
     FontWeight(FontWeight),
@@ -328,6 +525,7 @@ pub enum RichTextCode {
     FontStyle(FontStyle),
     Foreground(Color),
     Background(Color),
+    Newline,
     Text(String),
 }
 

@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{color::Color16, event::{Event, Key}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO};
+use crate::{color::{Color, Color16}, event::{Event, Key}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO};
 
 use clap::Parser;
 
@@ -49,7 +49,11 @@ fn main() -> Result<(), std::io::Error> {
 //  println!("{har:#?}");
     if 1 == 1 {
         for arg in std::env::args().skip(1) {
-            match RichText::parse(&RichTextStyle::default(), &arg) {
+            match RichText::parse(
+                &RichTextStyle::default(),
+                RichTextStyle::build().foreground(Color::Color16(Color16::Blue)).inner(),
+                &arg
+            ) {
                 Ok(rich_text) => {
                     println!("{:#?}", rich_text);
                 }
