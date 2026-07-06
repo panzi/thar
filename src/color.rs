@@ -19,6 +19,44 @@ pub enum Color16 {
 }
 
 impl Color16 {
+    pub fn parse(value: &str) -> Option<Self> {
+        if value.eq_ignore_ascii_case("black") {
+            Some(Color16::Black)
+        } else if value.eq_ignore_ascii_case("red") {
+            Some(Color16::Red)
+        } else if value.eq_ignore_ascii_case("green") {
+            Some(Color16::Green)
+        } else if value.eq_ignore_ascii_case("yellow") {
+            Some(Color16::Yellow)
+        } else if value.eq_ignore_ascii_case("blue") {
+            Some(Color16::Blue)
+        } else if value.eq_ignore_ascii_case("magenta") {
+            Some(Color16::Magenta)
+        } else if value.eq_ignore_ascii_case("cyan") {
+            Some(Color16::Cyan)
+        } else if value.eq_ignore_ascii_case("white") {
+            Some(Color16::White)
+        } else if value.eq_ignore_ascii_case("brightblack") || value.eq_ignore_ascii_case("grey") || value.eq_ignore_ascii_case("gray") {
+            Some(Color16::BrightBlack)
+        } else if value.eq_ignore_ascii_case("brightred") {
+            Some(Color16::BrightRed)
+        } else if value.eq_ignore_ascii_case("brightgreen") {
+            Some(Color16::BrightGreen)
+        } else if value.eq_ignore_ascii_case("brightyellow") {
+            Some(Color16::BrightYellow)
+        } else if value.eq_ignore_ascii_case("brightblue") {
+            Some(Color16::BrightBlue)
+        } else if value.eq_ignore_ascii_case("brightmagenta") {
+            Some(Color16::BrightMagenta)
+        } else if value.eq_ignore_ascii_case("brightcyan") {
+            Some(Color16::BrightCyan)
+        } else if value.eq_ignore_ascii_case("brightwhite") {
+            Some(Color16::BrightWhite)
+        } else {
+            None
+        }
+    }
+
     #[inline]
     pub fn fg(&self) -> &'static [u8] {
         match *self {
