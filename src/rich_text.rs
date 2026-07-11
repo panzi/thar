@@ -17,7 +17,7 @@ use crate::{char_width::CharWidth, color::{Color, Color16}, style::{FontStyle, F
 /// * `]]` a single close bracket (`]`)
 #[derive(Debug)]
 pub struct RichText {
-    rich_text: Vec<RichTextCode>,
+    rich_text: Vec<Vec<RichTextCode>>,
     lines: usize,
     width: usize,
 }
@@ -62,6 +62,7 @@ impl RichText {
     }
 
     pub fn append_plain_text(&mut self, toplevel_style: &RichTextStyle, control_style: &RichTextStyle, plain_text: &str) {
+        let mut line = Vec::new();
         let mut line_width = 0;
         let mut prev_index = 0;
 
@@ -71,21 +72,21 @@ impl RichText {
                     let text = &plain_text[prev_index..index];
                     let text_width = text.char_width_ignore_unprintable();
                     line_width += text_width;
-                    self.rich_text.push(RichTextCode::Text { text: text.to_string(), width: text_width });
+                    line.push(RichTextCode::Text { text: text.to_string(), width: text_width });
                 }
 
                 if ch == '\n' {
                     if ch == '\n' {
-                        self.rich_text.push(RichTextCode::Newline);
                         if line_width > self.width {
                             self.width = line_width;
                         }
                         line_width = 0;
                         self.lines += 1;
+                        std::mem::swap(self.rich_text.push_mut(Vec::new()), &mut line);
                     } else {
                         line_width += 1;
-                        toplevel_style.diff(control_style, &mut self.rich_text);
-                        self.rich_text.push(RichTextCode::Text {
+                        toplevel_style.diff(control_style, &mut line);
+                        line.push(RichTextCode::Text {
                             text: if ch == '\x7F' {
                                 "\u{2421}".to_string()
                             } else {
@@ -93,7 +94,7 @@ impl RichText {
                             },
                             width: 1,
                         });
-                        control_style.diff(toplevel_style, &mut self.rich_text);
+                        control_style.diff(toplevel_style, &mut line);
                     }
                 }
 
@@ -108,10 +109,14 @@ impl RichText {
             if line_width > self.width {
                 self.width = line_width;
             }
-            self.rich_text.push(RichTextCode::Text {
+            line.push(RichTextCode::Text {
                 text: text.to_string(),
                 width: text_width,
             });
+        }
+
+        if !line.is_empty() {
+            self.rich_text.push(line);
         }
     }
 
@@ -126,6 +131,7 @@ impl RichText {
         let mut index = 0;
         let mut buf = String::new();
 
+        let mut line = Vec::new();
         let mut line_width = 0;
 
         'outer: while index < rich_text.len() {
@@ -161,7 +167,7 @@ impl RichText {
                         if !buf.is_empty() {
                             let text_width = buf.char_width_ignore_unprintable();
                             line_width += text_width;
-                            self.rich_text.push(RichTextCode::Text {
+                            line.push(RichTextCode::Text {
                                 text: buf.clone(),
                                 width: text_width,
                             });
@@ -221,31 +227,31 @@ impl RichText {
                             match tag {
                                 Tag::Bold | Tag::Faint => {
                                     if current_style.font_weight != old_style.font_weight {
-                                        self.rich_text.push(RichTextCode::FontWeight(old_style.font_weight));
+                                        line.push(RichTextCode::FontWeight(old_style.font_weight));
                                         current_style.font_weight = old_style.font_weight;
                                     }
                                 }
                                 Tag::Italic => {
                                     if current_style.font_style != old_style.font_style {
-                                        self.rich_text.push(RichTextCode::FontStyle(old_style.font_style));
+                                        line.push(RichTextCode::FontStyle(old_style.font_style));
                                         current_style.font_style = old_style.font_style;
                                     }
                                 }
                                 Tag::Underline | Tag::DoublyUnderline => {
                                     if current_style.text_decoration != old_style.text_decoration {
-                                        self.rich_text.push(RichTextCode::TextDecoration(old_style.text_decoration));
+                                        line.push(RichTextCode::TextDecoration(old_style.text_decoration));
                                         current_style.text_decoration = old_style.text_decoration;
                                     }
                                 }
                                 Tag::Foreground => {
                                     if current_style.foreground != old_style.foreground {
-                                        self.rich_text.push(RichTextCode::Foreground(old_style.foreground));
+                                        line.push(RichTextCode::Foreground(old_style.foreground));
                                         current_style.foreground = old_style.foreground;
                                     }
                                 }
                                 Tag::Background => {
                                     if current_style.background != old_style.background {
-                                        self.rich_text.push(RichTextCode::Background(old_style.background));
+                                        line.push(RichTextCode::Background(old_style.background));
                                         current_style.background = old_style.background;
                                     }
                                 }
@@ -256,31 +262,31 @@ impl RichText {
                             match tag {
                                 Tag::Bold => {
                                     if current_style.font_weight != FontWeight::Bold {
-                                        self.rich_text.push(RichTextCode::FontWeight(FontWeight::Bold));
+                                        line.push(RichTextCode::FontWeight(FontWeight::Bold));
                                         current_style.font_weight = FontWeight::Bold;
                                     }
                                 }
                                 Tag::Faint => {
                                     if current_style.font_weight != FontWeight::Faint {
-                                        self.rich_text.push(RichTextCode::FontWeight(FontWeight::Faint));
+                                        line.push(RichTextCode::FontWeight(FontWeight::Faint));
                                         current_style.font_weight = FontWeight::Faint;
                                     }
                                 }
                                 Tag::Italic => {
                                     if current_style.font_style != FontStyle::Italic {
-                                        self.rich_text.push(RichTextCode::FontStyle(FontStyle::Italic));
+                                        line.push(RichTextCode::FontStyle(FontStyle::Italic));
                                         current_style.font_style = FontStyle::Italic;
                                     }
                                 }
                                 Tag::Underline => {
                                     if current_style.text_decoration != TextDecoration::Underline {
-                                        self.rich_text.push(RichTextCode::TextDecoration(TextDecoration::Underline));
+                                        line.push(RichTextCode::TextDecoration(TextDecoration::Underline));
                                         current_style.text_decoration = TextDecoration::Underline;
                                     }
                                 }
                                 Tag::DoublyUnderline => {
                                     if current_style.text_decoration != TextDecoration::DoublyUnderline {
-                                        self.rich_text.push(RichTextCode::TextDecoration(TextDecoration::DoublyUnderline));
+                                        line.push(RichTextCode::TextDecoration(TextDecoration::DoublyUnderline));
                                         current_style.text_decoration = TextDecoration::DoublyUnderline;
                                     }
                                 }
@@ -288,7 +294,7 @@ impl RichText {
                                     let (new_index, color) = parse_color_attr(rich_text, index)?;
                                     index = new_index;
                                     if current_style.foreground != color {
-                                        self.rich_text.push(RichTextCode::Foreground(color));
+                                        line.push(RichTextCode::Foreground(color));
                                         current_style.foreground = color;
                                     }
                                 }
@@ -296,7 +302,7 @@ impl RichText {
                                     let (new_index, color) = parse_color_attr(rich_text, index)?;
                                     index = new_index;
                                     if current_style.background != color {
-                                        self.rich_text.push(RichTextCode::Background(color));
+                                        line.push(RichTextCode::Background(color));
                                         current_style.background = color;
                                     }
                                 }
@@ -319,7 +325,7 @@ impl RichText {
                     if !buf.is_empty() {
                         let text_width = buf.char_width_ignore_unprintable();
                         line_width += text_width;
-                        self.rich_text.push(RichTextCode::Text {
+                        line.push(RichTextCode::Text {
                             text: buf.clone(),
                             width: text_width,
                         });
@@ -327,16 +333,16 @@ impl RichText {
                     }
 
                     if ch == '\n' {
-                        self.rich_text.push(RichTextCode::Newline);
                         if line_width > self.width {
                             self.width = line_width;
                         }
                         line_width = 0;
                         self.lines += 1;
+                        std::mem::swap(self.rich_text.push_mut(Vec::new()), &mut line);
                     } else {
                         line_width += 1;
-                        current_style.diff(control_style, &mut self.rich_text);
-                        self.rich_text.push(RichTextCode::Text {
+                        current_style.diff(control_style, &mut line);
+                        line.push(RichTextCode::Text {
                             text: if ch == '\x7F' {
                                 "\u{2421}".to_string()
                             } else {
@@ -344,7 +350,7 @@ impl RichText {
                             },
                             width: 1,
                         });
-                        control_style.diff(&current_style, &mut self.rich_text);
+                        control_style.diff(&current_style, &mut line);
                     }
 
                     index += char_index + 1;
@@ -369,10 +375,14 @@ impl RichText {
             if line_width > self.width {
                 self.width = line_width;
             }
-            self.rich_text.push(RichTextCode::Text {
+            line.push(RichTextCode::Text {
                 text: buf.clone(),
                 width: text_width,
             });
+        }
+
+        if !line.is_empty() {
+            self.rich_text.push(line);
         }
 
         Ok(())
@@ -389,12 +399,12 @@ impl RichText {
     }
 
     #[inline]
-    pub fn rich_text(&self) -> &[RichTextCode] {
+    pub fn rich_text(&self) -> &[Vec<RichTextCode>] {
         &self.rich_text
     }
 
     #[inline]
-    pub fn into_inner(self) -> Vec<RichTextCode> {
+    pub fn into_inner(self) -> Vec<Vec<RichTextCode>> {
         self.rich_text
     }
 }
@@ -597,7 +607,6 @@ pub enum RichTextCode {
     FontStyle(FontStyle),
     Foreground(Color),
     Background(Color),
-    Newline,
     Text { text: String, width: usize },
 }
 
