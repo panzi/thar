@@ -35,8 +35,9 @@ impl RichText {
             if ch.is_ascii_control() {
                 if prev_index < index {
                     let text = &plain_text[prev_index..index];
-                    line_width += text.char_width_ignore_unprintable();
-                    code.push(RichTextCode::Text(text.to_string()));
+                    let text_width = text.char_width_ignore_unprintable();
+                    line_width += text_width;
+                    code.push(RichTextCode::Text { text: text.to_string(), width: text_width });
                 }
 
                 if ch == '\n' {
@@ -50,13 +51,14 @@ impl RichText {
                     } else {
                         line_width += 1;
                         toplevel_style.diff(control_style, &mut code);
-                        code.push(RichTextCode::Text(
-                            if ch == '\x7F' {
+                        code.push(RichTextCode::Text {
+                            text: if ch == '\x7F' {
                                 "\u{2421}".to_string()
                             } else {
                                 unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }.to_string()
-                            }
-                        ));
+                            },
+                            width: 1,
+                        });
                         control_style.diff(toplevel_style, &mut code);
                     }
                 }
@@ -67,11 +69,15 @@ impl RichText {
 
         if prev_index < plain_text.len() {
             let text = &plain_text[prev_index..];
-            line_width += text.char_width_ignore_unprintable();
+            let text_width = text.char_width_ignore_unprintable();
+            line_width += text_width;
             if line_width > width {
                 width = line_width;
             }
-            code.push(RichTextCode::Text(text.to_string()));
+            code.push(RichTextCode::Text {
+                text: text.to_string(),
+                width: text_width,
+            });
         }
 
         Self {
@@ -120,8 +126,12 @@ impl RichText {
                         index = new_index;
 
                         if !buf.is_empty() {
-                            line_width += buf.char_width_ignore_unprintable();
-                            code.push(RichTextCode::Text(buf.clone()));
+                            let text_width = buf.char_width_ignore_unprintable();
+                            line_width += text_width;
+                            code.push(RichTextCode::Text {
+                                text: buf.clone(),
+                                width: text_width,
+                            });
                             buf.clear();
                         }
 
@@ -254,8 +264,12 @@ impl RichText {
                     continue 'outer;
                 } else if ch.is_ascii_control() {
                     if !buf.is_empty() {
-                        line_width += buf.char_width_ignore_unprintable();
-                        code.push(RichTextCode::Text(buf.clone()));
+                        let text_width = buf.char_width_ignore_unprintable();
+                        line_width += text_width;
+                        code.push(RichTextCode::Text {
+                            text: buf.clone(),
+                            width: text_width,
+                        });
                         buf.clear();
                     }
 
@@ -269,13 +283,14 @@ impl RichText {
                     } else {
                         line_width += 1;
                         current_style.diff(control_style, &mut code);
-                        code.push(RichTextCode::Text(
-                            if ch == '\x7F' {
+                        code.push(RichTextCode::Text {
+                            text: if ch == '\x7F' {
                                 "\u{2421}".to_string()
                             } else {
                                 unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }.to_string()
-                            }
-                        ));
+                            },
+                            width: 1,
+                        });
                         control_style.diff(&current_style, &mut code);
                     }
 
@@ -292,11 +307,15 @@ impl RichText {
         }
 
         if !buf.is_empty() {
-            line_width += buf.char_width_ignore_unprintable();
+            let text_width = buf.char_width_ignore_unprintable();
+            line_width += text_width;
             if line_width > width {
                 width = line_width;
             }
-            code.push(RichTextCode::Text(buf.clone()));
+            code.push(RichTextCode::Text {
+                text: buf.clone(),
+                width: text_width,
+            });
         }
 
         Ok(Self {
@@ -526,7 +545,7 @@ pub enum RichTextCode {
     Foreground(Color),
     Background(Color),
     Newline,
-    Text(String),
+    Text { text: String, width: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
