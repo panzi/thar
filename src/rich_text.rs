@@ -22,13 +22,47 @@ pub struct RichText {
     width: usize,
 }
 
-impl RichText {
-    pub fn from_plain_text(toplevel_style: &RichTextStyle, control_style: &RichTextStyle, plain_text: &str) -> Self {
-        let mut code = Vec::new();
-        let mut lines = 1;
-        let mut width = 0;
-        let mut line_width = 0;
+impl Default for RichText {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
+impl RichText {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            rich_text: Vec::new(),
+            lines: 1,
+            width: 0,
+        }
+    }
+
+    pub fn from_plain_text(toplevel_style: &RichTextStyle, control_style: &RichTextStyle, plain_text: &str) -> Self {
+        let mut rich_text = Self::new();
+        rich_text.append_plain_text(toplevel_style, control_style, plain_text);
+        rich_text
+    }
+
+    pub fn parse(toplevel_style: &RichTextStyle, control_style: &RichTextStyle, rich_text: &str) -> Result<Self, ParseError> {
+        let mut new_rich_text = RichText::new();
+
+        new_rich_text.append_rich_text(toplevel_style, control_style, rich_text)?;
+
+        Ok(new_rich_text)
+    }
+
+    pub fn append(&mut self, other: &RichText) {
+        self.rich_text.extend_from_slice(&other.rich_text);
+        if other.width > self.width {
+            self.width = other.width;
+        }
+        self.lines += other.lines;
+    }
+
+    pub fn append_plain_text(&mut self, toplevel_style: &RichTextStyle, control_style: &RichTextStyle, plain_text: &str) {
+        let mut line_width = 0;
         let mut prev_index = 0;
 
         for (index, ch) in plain_text.char_indices() {
@@ -37,21 +71,21 @@ impl RichText {
                     let text = &plain_text[prev_index..index];
                     let text_width = text.char_width_ignore_unprintable();
                     line_width += text_width;
-                    code.push(RichTextCode::Text { text: text.to_string(), width: text_width });
+                    self.rich_text.push(RichTextCode::Text { text: text.to_string(), width: text_width });
                 }
 
                 if ch == '\n' {
                     if ch == '\n' {
-                        code.push(RichTextCode::Newline);
-                        if line_width > width {
-                            width = line_width;
+                        self.rich_text.push(RichTextCode::Newline);
+                        if line_width > self.width {
+                            self.width = line_width;
                         }
                         line_width = 0;
-                        lines += 1;
+                        self.lines += 1;
                     } else {
                         line_width += 1;
-                        toplevel_style.diff(control_style, &mut code);
-                        code.push(RichTextCode::Text {
+                        toplevel_style.diff(control_style, &mut self.rich_text);
+                        self.rich_text.push(RichTextCode::Text {
                             text: if ch == '\x7F' {
                                 "\u{2421}".to_string()
                             } else {
@@ -59,7 +93,7 @@ impl RichText {
                             },
                             width: 1,
                         });
-                        control_style.diff(toplevel_style, &mut code);
+                        control_style.diff(toplevel_style, &mut self.rich_text);
                     }
                 }
 
@@ -71,32 +105,27 @@ impl RichText {
             let text = &plain_text[prev_index..];
             let text_width = text.char_width_ignore_unprintable();
             line_width += text_width;
-            if line_width > width {
-                width = line_width;
+            if line_width > self.width {
+                self.width = line_width;
             }
-            code.push(RichTextCode::Text {
+            self.rich_text.push(RichTextCode::Text {
                 text: text.to_string(),
                 width: text_width,
             });
         }
-
-        Self {
-            rich_text: code,
-            lines,
-            width,
-        }
     }
 
-    pub fn parse(toplevel_style: &RichTextStyle, control_style: &RichTextStyle, rich_text: &str) -> Result<Self, ParseError> {
+    pub fn append_rich_text(&mut self, toplevel_style: &RichTextStyle, control_style: &RichTextStyle, rich_text: &str) -> Result<(), ParseError> {
+        let old_lines = self.lines;
+        let old_width = self.width;
+        let old_len = self.rich_text.len();
+
         let mut current_style = *toplevel_style;
         let mut stack: Vec<(Tag, RichTextStyle)> = Vec::new();
-        let mut code = Vec::new();
 
         let mut index = 0;
         let mut buf = String::new();
 
-        let mut lines = 1;
-        let mut width = 0;
         let mut line_width = 0;
 
         'outer: while index < rich_text.len() {
@@ -112,6 +141,10 @@ impl RichText {
 
                     if ch == ']' {
                         if !rich_text[new_index..].starts_with(']') {
+                            self.width = old_width;
+                            self.lines = old_lines;
+                            self.rich_text.truncate(old_len);
+
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
                         }
 
@@ -128,7 +161,7 @@ impl RichText {
                         if !buf.is_empty() {
                             let text_width = buf.char_width_ignore_unprintable();
                             line_width += text_width;
-                            code.push(RichTextCode::Text {
+                            self.rich_text.push(RichTextCode::Text {
                                 text: buf.clone(),
                                 width: text_width,
                             });
@@ -149,12 +182,20 @@ impl RichText {
                         };
 
                         if end_index == index {
+                            self.width = old_width;
+                            self.lines = old_lines;
+                            self.rich_text.truncate(old_len);
+
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
                         }
 
                         let tag_name = &rich_text[index..end_index];
 
                         let Some(tag) = Tag::from_tag_name(tag_name) else {
+                            self.width = old_width;
+                            self.lines = old_lines;
+                            self.rich_text.truncate(old_len);
+
                             return Err(ParseError::new(ParseErrorKind::UnknownTag, index, rich_text));
                         };
 
@@ -162,41 +203,49 @@ impl RichText {
 
                         if is_end_tag {
                             let Some((old_tag, old_style)) = stack.pop() else {
+                                self.width = old_width;
+                                self.lines = old_lines;
+                                self.rich_text.truncate(old_len);
+
                                 return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: None }, index, rich_text));
                             };
 
                             if old_tag != tag {
+                                self.width = old_width;
+                                self.lines = old_lines;
+                                self.rich_text.truncate(old_len);
+
                                 return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: Some(old_tag) }, index, rich_text));
                             }
 
                             match tag {
                                 Tag::Bold | Tag::Faint => {
                                     if current_style.font_weight != old_style.font_weight {
-                                        code.push(RichTextCode::FontWeight(old_style.font_weight));
+                                        self.rich_text.push(RichTextCode::FontWeight(old_style.font_weight));
                                         current_style.font_weight = old_style.font_weight;
                                     }
                                 }
                                 Tag::Italic => {
                                     if current_style.font_style != old_style.font_style {
-                                        code.push(RichTextCode::FontStyle(old_style.font_style));
+                                        self.rich_text.push(RichTextCode::FontStyle(old_style.font_style));
                                         current_style.font_style = old_style.font_style;
                                     }
                                 }
                                 Tag::Underline | Tag::DoublyUnderline => {
                                     if current_style.text_decoration != old_style.text_decoration {
-                                        code.push(RichTextCode::TextDecoration(old_style.text_decoration));
+                                        self.rich_text.push(RichTextCode::TextDecoration(old_style.text_decoration));
                                         current_style.text_decoration = old_style.text_decoration;
                                     }
                                 }
                                 Tag::Foreground => {
                                     if current_style.foreground != old_style.foreground {
-                                        code.push(RichTextCode::Foreground(old_style.foreground));
+                                        self.rich_text.push(RichTextCode::Foreground(old_style.foreground));
                                         current_style.foreground = old_style.foreground;
                                     }
                                 }
                                 Tag::Background => {
                                     if current_style.background != old_style.background {
-                                        code.push(RichTextCode::Background(old_style.background));
+                                        self.rich_text.push(RichTextCode::Background(old_style.background));
                                         current_style.background = old_style.background;
                                     }
                                 }
@@ -207,31 +256,31 @@ impl RichText {
                             match tag {
                                 Tag::Bold => {
                                     if current_style.font_weight != FontWeight::Bold {
-                                        code.push(RichTextCode::FontWeight(FontWeight::Bold));
+                                        self.rich_text.push(RichTextCode::FontWeight(FontWeight::Bold));
                                         current_style.font_weight = FontWeight::Bold;
                                     }
                                 }
                                 Tag::Faint => {
                                     if current_style.font_weight != FontWeight::Faint {
-                                        code.push(RichTextCode::FontWeight(FontWeight::Faint));
+                                        self.rich_text.push(RichTextCode::FontWeight(FontWeight::Faint));
                                         current_style.font_weight = FontWeight::Faint;
                                     }
                                 }
                                 Tag::Italic => {
                                     if current_style.font_style != FontStyle::Italic {
-                                        code.push(RichTextCode::FontStyle(FontStyle::Italic));
+                                        self.rich_text.push(RichTextCode::FontStyle(FontStyle::Italic));
                                         current_style.font_style = FontStyle::Italic;
                                     }
                                 }
                                 Tag::Underline => {
                                     if current_style.text_decoration != TextDecoration::Underline {
-                                        code.push(RichTextCode::TextDecoration(TextDecoration::Underline));
+                                        self.rich_text.push(RichTextCode::TextDecoration(TextDecoration::Underline));
                                         current_style.text_decoration = TextDecoration::Underline;
                                     }
                                 }
                                 Tag::DoublyUnderline => {
                                     if current_style.text_decoration != TextDecoration::DoublyUnderline {
-                                        code.push(RichTextCode::TextDecoration(TextDecoration::DoublyUnderline));
+                                        self.rich_text.push(RichTextCode::TextDecoration(TextDecoration::DoublyUnderline));
                                         current_style.text_decoration = TextDecoration::DoublyUnderline;
                                     }
                                 }
@@ -239,7 +288,7 @@ impl RichText {
                                     let (new_index, color) = parse_color_attr(rich_text, index)?;
                                     index = new_index;
                                     if current_style.foreground != color {
-                                        code.push(RichTextCode::Foreground(color));
+                                        self.rich_text.push(RichTextCode::Foreground(color));
                                         current_style.foreground = color;
                                     }
                                 }
@@ -247,7 +296,7 @@ impl RichText {
                                     let (new_index, color) = parse_color_attr(rich_text, index)?;
                                     index = new_index;
                                     if current_style.background != color {
-                                        code.push(RichTextCode::Background(color));
+                                        self.rich_text.push(RichTextCode::Background(color));
                                         current_style.background = color;
                                     }
                                 }
@@ -255,6 +304,10 @@ impl RichText {
                         }
 
                         if !rich_text[index..].starts_with(']') {
+                            self.width = old_width;
+                            self.lines = old_lines;
+                            self.rich_text.truncate(old_len);
+
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
                         }
 
@@ -266,7 +319,7 @@ impl RichText {
                     if !buf.is_empty() {
                         let text_width = buf.char_width_ignore_unprintable();
                         line_width += text_width;
-                        code.push(RichTextCode::Text {
+                        self.rich_text.push(RichTextCode::Text {
                             text: buf.clone(),
                             width: text_width,
                         });
@@ -274,16 +327,16 @@ impl RichText {
                     }
 
                     if ch == '\n' {
-                        code.push(RichTextCode::Newline);
-                        if line_width > width {
-                            width = line_width;
+                        self.rich_text.push(RichTextCode::Newline);
+                        if line_width > self.width {
+                            self.width = line_width;
                         }
                         line_width = 0;
-                        lines += 1;
+                        self.lines += 1;
                     } else {
                         line_width += 1;
-                        current_style.diff(control_style, &mut code);
-                        code.push(RichTextCode::Text {
+                        current_style.diff(control_style, &mut self.rich_text);
+                        self.rich_text.push(RichTextCode::Text {
                             text: if ch == '\x7F' {
                                 "\u{2421}".to_string()
                             } else {
@@ -291,7 +344,7 @@ impl RichText {
                             },
                             width: 1,
                         });
-                        control_style.diff(&current_style, &mut code);
+                        control_style.diff(&current_style, &mut self.rich_text);
                     }
 
                     index += char_index + 1;
@@ -303,26 +356,26 @@ impl RichText {
         }
 
         if let Some((tag, _)) = stack.pop() {
+            self.width = old_width;
+            self.lines = old_lines;
+            self.rich_text.truncate(old_len);
+
             return Err(ParseError::new(ParseErrorKind::ExpectedCloseTag(tag), rich_text.len(), rich_text));
         }
 
         if !buf.is_empty() {
             let text_width = buf.char_width_ignore_unprintable();
             line_width += text_width;
-            if line_width > width {
-                width = line_width;
+            if line_width > self.width {
+                self.width = line_width;
             }
-            code.push(RichTextCode::Text {
+            self.rich_text.push(RichTextCode::Text {
                 text: buf.clone(),
                 width: text_width,
             });
         }
 
-        Ok(Self {
-            rich_text: code,
-            lines,
-            width,
-        })
+        Ok(())
     }
 
     #[inline]
