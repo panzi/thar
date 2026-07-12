@@ -17,8 +17,20 @@ use crate::{char_width::CharWidth, color::{Color, Color16}, style::{FontStyle, F
 /// * `]]` a single close bracket (`]`)
 #[derive(Debug)]
 pub struct RichText {
-    rich_text: Vec<Vec<RichTextCode>>,
+    lines: Vec<Vec<RichTextCode>>,
     width: usize,
+}
+
+pub fn line_width(line: &[RichTextCode]) -> usize {
+    let mut line_width = 0;
+
+    for code in line {
+        if let RichTextCode::Text { text: _, width } = code {
+            line_width += width;
+        }
+    }
+
+    line_width
 }
 
 impl Default for RichText {
@@ -32,7 +44,7 @@ impl RichText {
     #[inline]
     pub fn new() -> Self {
         Self {
-            rich_text: Vec::new(),
+            lines: Vec::new(),
             width: 0,
         }
     }
@@ -52,7 +64,7 @@ impl RichText {
     }
 
     pub fn append(&mut self, other: &RichText) {
-        self.rich_text.extend_from_slice(&other.rich_text);
+        self.lines.extend_from_slice(&other.lines);
         if other.width > self.width {
             self.width = other.width;
         }
@@ -78,7 +90,7 @@ impl RichText {
                             self.width = line_width;
                         }
                         line_width = 0;
-                        std::mem::swap(self.rich_text.push_mut(Vec::new()), &mut line);
+                        std::mem::swap(self.lines.push_mut(Vec::new()), &mut line);
                     } else {
                         line_width += 1;
                         toplevel_style.diff(control_style, &mut line);
@@ -112,13 +124,13 @@ impl RichText {
         }
 
         if !line.is_empty() {
-            self.rich_text.push(line);
+            self.lines.push(line);
         }
     }
 
     pub fn append_rich_text(&mut self, toplevel_style: &RichTextStyle, control_style: &RichTextStyle, rich_text: &str) -> Result<(), ParseError> {
         let old_width = self.width;
-        let old_len = self.rich_text.len();
+        let old_len = self.lines.len();
 
         let mut current_style = *toplevel_style;
         let mut stack: Vec<(Tag, RichTextStyle)> = Vec::new();
@@ -143,7 +155,7 @@ impl RichText {
                     if ch == ']' {
                         if !rich_text[new_index..].starts_with(']') {
                             self.width = old_width;
-                            self.rich_text.truncate(old_len);
+                            self.lines.truncate(old_len);
 
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
                         }
@@ -183,7 +195,7 @@ impl RichText {
 
                         if end_index == index {
                             self.width = old_width;
-                            self.rich_text.truncate(old_len);
+                            self.lines.truncate(old_len);
 
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
                         }
@@ -192,7 +204,7 @@ impl RichText {
 
                         let Some(tag) = Tag::from_tag_name(tag_name) else {
                             self.width = old_width;
-                            self.rich_text.truncate(old_len);
+                            self.lines.truncate(old_len);
 
                             return Err(ParseError::new(ParseErrorKind::UnknownTag, index, rich_text));
                         };
@@ -202,14 +214,14 @@ impl RichText {
                         if is_end_tag {
                             let Some((old_tag, old_style)) = stack.pop() else {
                                 self.width = old_width;
-                                self.rich_text.truncate(old_len);
+                                self.lines.truncate(old_len);
 
                                 return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: None }, index, rich_text));
                             };
 
                             if old_tag != tag {
                                 self.width = old_width;
-                                self.rich_text.truncate(old_len);
+                                self.lines.truncate(old_len);
 
                                 return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: Some(old_tag) }, index, rich_text));
                             }
@@ -301,7 +313,7 @@ impl RichText {
 
                         if !rich_text[index..].starts_with(']') {
                             self.width = old_width;
-                            self.rich_text.truncate(old_len);
+                            self.lines.truncate(old_len);
 
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
                         }
@@ -326,7 +338,7 @@ impl RichText {
                             self.width = line_width;
                         }
                         line_width = 0;
-                        std::mem::swap(self.rich_text.push_mut(Vec::new()), &mut line);
+                        std::mem::swap(self.lines.push_mut(Vec::new()), &mut line);
                     } else {
                         line_width += 1;
                         current_style.diff(control_style, &mut line);
@@ -351,7 +363,7 @@ impl RichText {
 
         if let Some((tag, _)) = stack.pop() {
             self.width = old_width;
-            self.rich_text.truncate(old_len);
+            self.lines.truncate(old_len);
 
             return Err(ParseError::new(ParseErrorKind::ExpectedCloseTag(tag), rich_text.len(), rich_text));
         }
@@ -369,15 +381,10 @@ impl RichText {
         }
 
         if !line.is_empty() {
-            self.rich_text.push(line);
+            self.lines.push(line);
         }
 
         Ok(())
-    }
-
-    #[inline]
-    pub fn lines(&self) -> usize {
-        self.rich_text.len()
     }
 
     #[inline]
@@ -386,13 +393,87 @@ impl RichText {
     }
 
     #[inline]
-    pub fn rich_text(&self) -> &[Vec<RichTextCode>] {
-        &self.rich_text
+    pub fn lines(&self) -> &[Vec<RichTextCode>] {
+        &self.lines
     }
 
     #[inline]
     pub fn into_inner(self) -> Vec<Vec<RichTextCode>> {
-        self.rich_text
+        self.lines
+    }
+
+    pub fn right_pad(&mut self, width: usize) {
+        for line in &mut self.lines {
+            let line_width = line_width(line);
+
+            if line_width < width {
+                let diff = width - line_width;
+                if let Some(RichTextCode::Text { text, width: text_width }) = line.last_mut() {
+                    text.reserve(diff);
+                    for _ in 0..diff {
+                        text.push(' ');
+                    }
+                    *text_width += diff;
+                } else {
+                    let text = " ".repeat(diff);
+                    line.push(RichTextCode::Text { text, width: diff });
+                }
+            }
+        }
+    }
+
+    pub fn left_pad(&mut self, width: usize) {
+        for line in &mut self.lines {
+            let line_width = line_width(line);
+
+            if line_width < width {
+                let diff = width - line_width;
+                if let Some(RichTextCode::Text { text, width: text_width }) = line.first_mut() {
+                    let mut new_text = String::with_capacity(text.len() + diff);
+                    for _ in 0..diff {
+                        new_text.push(' ');
+                    }
+                    new_text.push_str(&text);
+                    std::mem::swap(&mut new_text, text);
+                    *text_width += diff;
+                } else {
+                    let text = " ".repeat(diff);
+                    line.insert(0, RichTextCode::Text { text, width: diff });
+                }
+            }
+        }
+    }
+
+    pub fn vertical_append(&mut self, toplevel_style: &RichTextStyle, other: &RichText) {
+        self.right_pad(self.width);
+
+        let mut self_style = *toplevel_style;
+        let mut other_style = *toplevel_style;
+
+        for (self_line, other_line) in self.lines.iter_mut().zip(other.lines.iter()) {
+            self_style.apply_changes(self_line);
+
+            self_style.diff(&other_style, self_line);
+            self_line.extend_from_slice(&other_line);
+
+            other_style.apply_changes(other_line);
+            other_style.diff(&self_style, self_line);
+        }
+
+        if self.lines.len() < other.lines.len() {
+            self.lines.reserve(other.lines.len() - self.lines.len());
+            for other_line in &other.lines[self.lines.len()..] {
+                let mut self_line = Vec::with_capacity(other_line.len() + (self.width > 0) as usize);
+                if self.width > 0 {
+                    let text = " ".repeat(self.width);
+                    self_line.push(RichTextCode::Text { text, width: self.width });
+                }
+                self_line.extend_from_slice(&other_line);
+                self.lines.push(self_line);
+            }
+        }
+
+        self.width += other.width;
     }
 }
 
@@ -500,6 +581,29 @@ impl RichTextStyle {
     pub fn build() -> RichTextStyleBuilder {
         RichTextStyleBuilder::default()
     }
+
+    pub fn apply_changes(&mut self, line: &[RichTextCode]) {
+        for code in line {
+            match code {
+                RichTextCode::FontWeight(font_weight) => {
+                    self.font_weight = *font_weight;
+                }
+                RichTextCode::FontStyle(font_style) => {
+                    self.font_style = *font_style;
+                }
+                RichTextCode::TextDecoration(text_decoration) => {
+                    self.text_decoration = *text_decoration;
+                }
+                RichTextCode::Foreground(color) => {
+                    self.foreground = *color;
+                }
+                RichTextCode::Background(color) => {
+                    self.background = *color;
+                }
+                RichTextCode::Text { .. } => {}
+            }
+        }
+    }
 }
 
 impl From<&TextStyle> for RichTextStyle {
@@ -595,6 +699,16 @@ pub enum RichTextCode {
     Foreground(Color),
     Background(Color),
     Text { text: String, width: usize },
+}
+
+impl RichTextCode {
+    #[inline]
+    pub fn width(&self) -> usize {
+        match self {
+            RichTextCode::Text { width, .. } => *width,
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
