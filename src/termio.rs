@@ -1,6 +1,6 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowed_fd::BorrowedFd, char_width::CharWidth, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
+use crate::{borrowed_fd::BorrowedFd, char_width::CharWidth, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, rich_text::{RichText, RichTextCode}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -147,73 +147,6 @@ impl TermIO {
     }
 
     #[inline]
-    fn line(&mut self, row: i32, mut column: i32, line: &str) -> std::io::Result<()> {
-        if row < 1 || row as u32 > self.window_size.rows {
-            return Ok(());
-        }
-
-        let mut iter = line.chars().map(|c|
-            if c < '\x1F' { (1, true, unsafe { char::from_u32_unchecked(0x2400 + c as u32) }) }
-            else if c == '\x7F' { (1, true, '\u{2421}') }
-            else { (c.char_width_ignore_unprintable(), false, c) });
-
-        while column < 1 {
-            let Some((w, _, _)) = iter.next() else {
-                break;
-            };
-
-            // TODO: check integer overflow?
-            column += w as i32;
-        }
-
-        if column < 1 {
-            // end of string reached before moved far enough
-            return Ok(());
-        }
-
-        self.move_cursor(row as u32, column as u32)?;
-
-        let mut buf = [0u8; 4];
-        while (column as u32) < self.window_size.columns {
-            let Some((w, special, c)) = iter.next() else {
-                break;
-            };
-
-            let s = c.encode_utf8(&mut buf).as_bytes();
-
-            if special {
-                self.fg16(Color16::Magenta)?;
-                self.writer.write_all(s)?;
-                self.fg_default()?;
-            } else {
-                self.writer.write_all(s)?;
-            }
-
-            // TODO: check integer overflow?
-            column += w as i32;
-        }
-
-        Ok(())
-    }
-
-    #[inline]
-    pub fn text(&mut self, mut row: i32, column: i32, text: &str) -> std::io::Result<()> {
-        if column > 0 && column as u32 > self.window_size.columns {
-            return Ok(());
-        }
-
-        for line in text.split('\n') {
-            if row > 0 && row as u32 > self.window_size.rows {
-                break;
-            }
-            self.line(row, column, line)?;
-            row += 1;
-        }
-
-        Ok(())
-    }
-
-    #[inline]
     pub fn flush(&mut self) -> std::io::Result<()> {
         self.writer.flush()
     }
@@ -266,8 +199,84 @@ impl TermIO {
         }
     }
 
+    pub fn rich_text(&mut self, row: i32, column: i32, width: u32, height: u32, rich_text: &RichText) -> std::io::Result<()> {
+        if row < 0 && -row as usize >= rich_text.height() {
+            return Ok(());
+        }
+
+        if column < 0 && -column as usize >= rich_text.width() {
+            return Ok(());
+        }
+
+        if row > 0 && row as u32 > self.window_size.rows {
+            return Ok(());
+        }
+
+        if column > 0 && column as u32 > self.window_size.columns {
+            return Ok(());
+        }
+
+        let min_height = rich_text.height().min(height as usize);
+
+        let start_line_index = if row < 0 { -row as usize } else { 0 };
+        let end_line_index = if row < 0 { min_height - -row as usize } else { min_height };
+        let end_line_index = if end_line_index - start_line_index > self.window_size.rows as usize {
+            start_line_index + self.window_size.rows as usize
+        } else {
+            end_line_index
+        };
+
+        let lines = &rich_text.lines()[start_line_index..end_line_index];
+
+        self.clear_style()?;
+
+        let start_row = if row < 0 { 0 } else { row as u32 };
+        let start_column = if column < 0 { 0 } else { column as u32 };
+
+        for (line_index, line) in lines.iter().enumerate() {
+            let mut moved = false;
+            let mut line_width = 0;
+            let start_width = if column < 0 { -column as usize } else { 0 };
+            let end_width = if column > 0 {
+                self.window_size.columns as usize - -column as usize
+            } else {
+                self.window_size.columns as usize
+            }.min(width as usize);
+
+            for code in line {
+                match code {
+                    RichTextCode::FontWeight(font_weight) => self.font_weight(*font_weight)?,
+                    RichTextCode::FontStyle(font_style) => self.font_style(*font_style)?,
+                    RichTextCode::TextDecoration(text_decoration) => self.text_decoration(*text_decoration)?,
+                    RichTextCode::Foreground(color) => self.fg(*color)?,
+                    RichTextCode::Background(color) => self.bg(*color)?,
+                    RichTextCode::Text { text, width } => {
+                        if line_width >= start_width && line_width + width <= end_width {
+                            if !moved {
+                                self.move_cursor(start_row, start_column + line_index as u32)?;
+                                moved = true;
+                            }
+
+                            self.write_str(text)?;
+                            line_width += width;
+                        } else if line_width + width >= start_width && line_width < end_width {
+                            if !moved {
+                                self.move_cursor(start_row, start_column + line_index as u32)?;
+                                moved = true;
+                            }
+
+                            // TODO: crop
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     #[inline]
-    pub fn normal(&mut self) -> std::io::Result<()> {
+    pub fn clear_style(&mut self) -> std::io::Result<()> {
         self.writer.write_all(b"\x1B[0m")
     }
 

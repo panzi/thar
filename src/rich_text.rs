@@ -49,16 +49,16 @@ impl RichText {
         }
     }
 
-    pub fn from_plain_text(toplevel_style: &RichTextStyle, control_style: &RichTextStyle, plain_text: &str) -> Self {
+    pub fn from_plain_text(plain_text: &str) -> Self {
         let mut rich_text = Self::new();
-        rich_text.append_plain_text(toplevel_style, control_style, plain_text);
+        rich_text.append_plain_text(plain_text);
         rich_text
     }
 
-    pub fn parse(toplevel_style: &RichTextStyle, control_style: &RichTextStyle, rich_text: &str) -> Result<Self, ParseError> {
+    pub fn parse(rich_text: &str) -> Result<Self, ParseError> {
         let mut new_rich_text = RichText::new();
 
-        new_rich_text.append_rich_text(toplevel_style, control_style, rich_text)?;
+        new_rich_text.append_rich_text(rich_text)?;
 
         Ok(new_rich_text)
     }
@@ -70,10 +70,16 @@ impl RichText {
         }
     }
 
-    pub fn append_plain_text(&mut self, toplevel_style: &RichTextStyle, control_style: &RichTextStyle, plain_text: &str) {
+    pub fn append_plain_text(&mut self, plain_text: &str) {
+        self.append_text(&DEFAULT_STYLE, plain_text);
+    }
+
+    pub fn append_text(&mut self, style: &RichTextStyle, plain_text: &str) {
         let mut line = Vec::new();
         let mut line_width = 0;
         let mut prev_index = 0;
+
+        DEFAULT_STYLE.diff(style, &mut line);
 
         for (index, ch) in plain_text.char_indices() {
             if ch.is_ascii_control() {
@@ -93,7 +99,7 @@ impl RichText {
                         std::mem::swap(self.lines.push_mut(Vec::new()), &mut line);
                     } else {
                         line_width += 1;
-                        toplevel_style.diff(control_style, &mut line);
+                        style.diff(&CONTROL_STYLE, &mut line);
                         line.push(RichTextCode::Text {
                             text: if ch == '\x7F' {
                                 "\u{2421}".to_string()
@@ -102,7 +108,7 @@ impl RichText {
                             },
                             width: 1,
                         });
-                        control_style.diff(toplevel_style, &mut line);
+                        CONTROL_STYLE.diff(style, &mut line);
                     }
                 }
 
@@ -123,16 +129,18 @@ impl RichText {
             });
         }
 
+        style.diff(&DEFAULT_STYLE, &mut line);
+
         if !line.is_empty() {
             self.lines.push(line);
         }
     }
 
-    pub fn append_rich_text(&mut self, toplevel_style: &RichTextStyle, control_style: &RichTextStyle, rich_text: &str) -> Result<(), ParseError> {
+    pub fn append_rich_text(&mut self, rich_text: &str) -> Result<(), ParseError> {
         let old_width = self.width;
         let old_len = self.lines.len();
 
-        let mut current_style = *toplevel_style;
+        let mut current_style = RichTextStyle::default();
         let mut stack: Vec<(Tag, RichTextStyle)> = Vec::new();
 
         let mut index = 0;
@@ -341,7 +349,7 @@ impl RichText {
                         std::mem::swap(self.lines.push_mut(Vec::new()), &mut line);
                     } else {
                         line_width += 1;
-                        current_style.diff(control_style, &mut line);
+                        current_style.diff(&CONTROL_STYLE, &mut line);
                         line.push(RichTextCode::Text {
                             text: if ch == '\x7F' {
                                 "\u{2421}".to_string()
@@ -350,7 +358,7 @@ impl RichText {
                             },
                             width: 1,
                         });
-                        control_style.diff(&current_style, &mut line);
+                        CONTROL_STYLE.diff(&current_style, &mut line);
                     }
 
                     index += char_index + 1;
@@ -390,6 +398,11 @@ impl RichText {
     #[inline]
     pub fn width(&self) -> usize {
         self.width
+    }
+
+    #[inline]
+    pub fn height(&self) -> usize {
+        self.lines.len()
     }
 
     #[inline]
@@ -545,7 +558,20 @@ fn parse_color_attr(rich_text: &str, mut index: usize) -> Result<(usize, Color),
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+const DEFAULT_STYLE: RichTextStyle = RichTextStyle {
+    font_weight: FontWeight::Normal,
+    text_decoration: TextDecoration::None,
+    font_style: FontStyle::Normal,
+    foreground: Color::Default,
+    background: Color::Default,
+};
+
+const CONTROL_STYLE: RichTextStyle = RichTextStyle {
+    foreground: Color::Color16(Color16::Blue),
+    ..DEFAULT_STYLE
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RichTextStyle {
     pub font_weight: FontWeight,
     pub text_decoration: TextDecoration,
@@ -554,8 +580,19 @@ pub struct RichTextStyle {
     pub background: Color,
 }
 
+impl Default for RichTextStyle {
+    #[inline]
+    fn default() -> Self {
+        DEFAULT_STYLE
+    }
+}
+
 impl RichTextStyle {
     pub fn diff(&self, new_style: &RichTextStyle, code: &mut Vec<RichTextCode>) {
+        if std::ptr::eq(self, new_style) {
+            return;
+        }
+
         if self.font_weight != new_style.font_weight {
             code.push(RichTextCode::FontWeight(new_style.font_weight));
         }
