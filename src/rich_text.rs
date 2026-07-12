@@ -18,7 +18,6 @@ use crate::{char_width::CharWidth, color::{Color, Color16}, style::{FontStyle, F
 #[derive(Debug)]
 pub struct RichText {
     rich_text: Vec<Vec<RichTextCode>>,
-    lines: usize,
     width: usize,
 }
 
@@ -34,7 +33,6 @@ impl RichText {
     pub fn new() -> Self {
         Self {
             rich_text: Vec::new(),
-            lines: 1,
             width: 0,
         }
     }
@@ -58,7 +56,6 @@ impl RichText {
         if other.width > self.width {
             self.width = other.width;
         }
-        self.lines += other.lines;
     }
 
     pub fn append_plain_text(&mut self, toplevel_style: &RichTextStyle, control_style: &RichTextStyle, plain_text: &str) {
@@ -81,7 +78,6 @@ impl RichText {
                             self.width = line_width;
                         }
                         line_width = 0;
-                        self.lines += 1;
                         std::mem::swap(self.rich_text.push_mut(Vec::new()), &mut line);
                     } else {
                         line_width += 1;
@@ -121,7 +117,6 @@ impl RichText {
     }
 
     pub fn append_rich_text(&mut self, toplevel_style: &RichTextStyle, control_style: &RichTextStyle, rich_text: &str) -> Result<(), ParseError> {
-        let old_lines = self.lines;
         let old_width = self.width;
         let old_len = self.rich_text.len();
 
@@ -148,7 +143,6 @@ impl RichText {
                     if ch == ']' {
                         if !rich_text[new_index..].starts_with(']') {
                             self.width = old_width;
-                            self.lines = old_lines;
                             self.rich_text.truncate(old_len);
 
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
@@ -189,7 +183,6 @@ impl RichText {
 
                         if end_index == index {
                             self.width = old_width;
-                            self.lines = old_lines;
                             self.rich_text.truncate(old_len);
 
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
@@ -199,7 +192,6 @@ impl RichText {
 
                         let Some(tag) = Tag::from_tag_name(tag_name) else {
                             self.width = old_width;
-                            self.lines = old_lines;
                             self.rich_text.truncate(old_len);
 
                             return Err(ParseError::new(ParseErrorKind::UnknownTag, index, rich_text));
@@ -210,7 +202,6 @@ impl RichText {
                         if is_end_tag {
                             let Some((old_tag, old_style)) = stack.pop() else {
                                 self.width = old_width;
-                                self.lines = old_lines;
                                 self.rich_text.truncate(old_len);
 
                                 return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: None }, index, rich_text));
@@ -218,7 +209,6 @@ impl RichText {
 
                             if old_tag != tag {
                                 self.width = old_width;
-                                self.lines = old_lines;
                                 self.rich_text.truncate(old_len);
 
                                 return Err(ParseError::new(ParseErrorKind::UnexpectedCloseTag { actual: tag, expected: Some(old_tag) }, index, rich_text));
@@ -311,7 +301,6 @@ impl RichText {
 
                         if !rich_text[index..].starts_with(']') {
                             self.width = old_width;
-                            self.lines = old_lines;
                             self.rich_text.truncate(old_len);
 
                             return Err(ParseError::new(ParseErrorKind::SyntaxError, index, rich_text));
@@ -337,7 +326,6 @@ impl RichText {
                             self.width = line_width;
                         }
                         line_width = 0;
-                        self.lines += 1;
                         std::mem::swap(self.rich_text.push_mut(Vec::new()), &mut line);
                     } else {
                         line_width += 1;
@@ -363,7 +351,6 @@ impl RichText {
 
         if let Some((tag, _)) = stack.pop() {
             self.width = old_width;
-            self.lines = old_lines;
             self.rich_text.truncate(old_len);
 
             return Err(ParseError::new(ParseErrorKind::ExpectedCloseTag(tag), rich_text.len(), rich_text));
@@ -390,7 +377,7 @@ impl RichText {
 
     #[inline]
     pub fn lines(&self) -> usize {
-        self.lines
+        self.rich_text.len()
     }
 
     #[inline]
