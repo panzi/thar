@@ -100,6 +100,16 @@ impl Color16 {
             Self::BrightWhite   => b"\x1B[107m",
         }
     }
+
+    #[inline]
+    pub fn to_color(&self) -> Color {
+        Color::Color16(*self)
+    }
+
+    #[inline]
+    pub fn into_color(self) -> Color {
+        Color::Color16(self)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +137,16 @@ impl Rgb {
     #[inline]
     pub fn to_u32(&self) -> u32 {
         ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
+    }
+
+    #[inline]
+    pub fn to_color(&self) -> Color {
+        Color::Rgb { r: self.r, g: self.g, b: self. b }
+    }
+
+    #[inline]
+    pub fn into_color(self) -> Color {
+        Color::Rgb { r: self.r, g: self.g, b: self. b }
     }
 }
 

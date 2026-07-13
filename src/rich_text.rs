@@ -15,7 +15,7 @@ use crate::{char_width::CharWidth, color::{Color, Color16}, style::{FontStyle, F
 /// * `[bg=blue]background color name, can be default[/bg]`
 /// * `[[` a single open bracket (`[`)
 /// * `]]` a single close bracket (`]`)
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct RichText {
     lines: Vec<Vec<RichTextCode>>,
     width: usize,
@@ -33,20 +33,10 @@ pub fn line_width(line: &[RichTextCode]) -> usize {
     line_width
 }
 
-impl Default for RichText {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl RichText {
     #[inline]
     pub fn new() -> Self {
-        Self {
-            lines: Vec::new(),
-            width: 0,
-        }
+        Self::default()
     }
 
     pub fn from_plain_text(plain_text: &str) -> Self {
@@ -75,7 +65,11 @@ impl RichText {
     }
 
     pub fn append_text(&mut self, style: &RichTextStyle, plain_text: &str) {
-        let mut line = Vec::new();
+        let mut line = if let Some(line) = self.lines.last_mut() {
+            line
+        } else {
+            self.lines.push_mut(Vec::new())
+        };
         let mut line_width = 0;
         let mut prev_index = 0;
 
@@ -90,13 +84,13 @@ impl RichText {
                     line.push(RichTextCode::Text { text: text.to_string(), width: text_width });
                 }
 
-                if ch == '\n' {
+                if ch.is_ascii_control() {
                     if ch == '\n' {
                         if line_width > self.width {
                             self.width = line_width;
                         }
                         line_width = 0;
-                        std::mem::swap(self.lines.push_mut(Vec::new()), &mut line);
+                        line = self.lines.push_mut(Vec::new());
                     } else {
                         line_width += 1;
                         style.diff(&CONTROL_STYLE, &mut line);
@@ -112,7 +106,7 @@ impl RichText {
                     }
                 }
 
-                prev_index = index;
+                prev_index = index + 1;
             }
         }
 
@@ -130,10 +124,6 @@ impl RichText {
         }
 
         style.diff(&DEFAULT_STYLE, &mut line);
-
-        if !line.is_empty() {
-            self.lines.push(line);
-        }
     }
 
     pub fn append_rich_text(&mut self, rich_text: &str) -> Result<(), ParseError> {
@@ -146,7 +136,11 @@ impl RichText {
         let mut index = 0;
         let mut buf = String::new();
 
-        let mut line = Vec::new();
+        let mut line = if let Some(line) = self.lines.last_mut() {
+            line
+        } else {
+            self.lines.push_mut(Vec::new())
+        };
         let mut line_width = 0;
 
         'outer: while index < rich_text.len() {
@@ -346,7 +340,7 @@ impl RichText {
                             self.width = line_width;
                         }
                         line_width = 0;
-                        std::mem::swap(self.lines.push_mut(Vec::new()), &mut line);
+                        line = self.lines.push_mut(Vec::new());
                     } else {
                         line_width += 1;
                         current_style.diff(&CONTROL_STYLE, &mut line);
@@ -366,6 +360,10 @@ impl RichText {
                 }
             }
 
+            if index < rich_text.len() {
+                buf.push_str(&rich_text[index..]);
+            }
+
             break;
         }
 
@@ -379,17 +377,14 @@ impl RichText {
         if !buf.is_empty() {
             let text_width = buf.char_width_ignore_unprintable();
             line_width += text_width;
-            if line_width > self.width {
-                self.width = line_width;
-            }
             line.push(RichTextCode::Text {
-                text: buf.clone(),
+                text: buf,
                 width: text_width,
             });
         }
 
-        if !line.is_empty() {
-            self.lines.push(line);
+        if line_width > self.width {
+            self.width = line_width;
         }
 
         Ok(())

@@ -1,25 +1,26 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowed_fd::BorrowedFd, char_width::CharWidth, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, rich_text::{RichText, RichTextCode}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
+use crate::{borrowed_fd::BorrowedFd, char_width::{CharWidth, crop}, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, rich_text::{RichText, RichTextCode}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug)]
 pub struct TermIO {
+    epoll: EPoll,
+    orig_termios: libc::termios,
+    window_size: WindowSize,
+    writer: BufWriter<BorrowedFd>,
+    uint_buffer: Vec<u32>,
     wfd: RawFd,
     rfd: RawFd,
-    writer: BufWriter<BorrowedFd>,
     buffer: Box<[u8]>,
     buffer_size: usize,
     buffer_index: usize,
-    uint_buffer: Vec<u32>,
     events: Box<[crate::epoll::Event]>,
-    orig_termios: libc::termios,
     sigwinch_nr: u32,
-    epoll: EPoll,
     mouse_enabled: bool,
-    window_size: WindowSize,
+    inverted: bool,
 }
 
 const READ_SIZE: usize = 1024;
@@ -101,6 +102,7 @@ impl TermIO {
             events: vec![crate::epoll::Event::default(); EPOLL_BUFFER_SIZE].into_boxed_slice(),
             mouse_enabled: false,
             window_size: WindowSize::default(),
+            inverted: false,
         };
 
         app.epoll.add(rfd, Events::In | Events::ReadHangup, 0)?;
@@ -110,6 +112,7 @@ impl TermIO {
         // CSI ?    7 l   No Auto-Wrap Mode (DECAWM), VT100.
         // CSI 2 J        Clear entire screen
         app.write(b"\x1B[?1049h\x1B[?25l\x1B[?7l\x1B[2J")?;
+        //app.write(b"\x1B[?25l\x1B[?7l\x1B[2J")?;
         app.flush()?;
         app.refresh_window_size()?;
 
@@ -152,33 +155,87 @@ impl TermIO {
     }
 
     #[inline]
-    pub fn fg_default(&mut self) -> std::io::Result<()> {
+    pub fn raw_fg_default(&mut self) -> std::io::Result<()> {
         self.writer.write_all(FG_DEFAULT)
     }
 
     #[inline]
-    pub fn bg_default(&mut self) -> std::io::Result<()> {
+    pub fn raw_bg_default(&mut self) -> std::io::Result<()> {
         self.writer.write_all(BG_DEFAULT)
     }
 
     #[inline]
-    pub fn fg_rgb(&mut self, Rgb { r, g, b }: Rgb) -> std::io::Result<()> {
+    pub fn raw_fg_rgb(&mut self, Rgb { r, g, b }: Rgb) -> std::io::Result<()> {
         write!(self.writer, "\x1B[38;2;{r};{g};{b}m")
     }
 
     #[inline]
-    pub fn bg_rgb(&mut self, Rgb { r, g, b }: Rgb) -> std::io::Result<()> {
+    pub fn raw_bg_rgb(&mut self, Rgb { r, g, b }: Rgb) -> std::io::Result<()> {
         write!(self.writer, "\x1B[48;2;{r};{g};{b}m")
     }
 
     #[inline]
-    pub fn fg16(&mut self, color: Color16) -> std::io::Result<()> {
+    pub fn raw_fg16(&mut self, color: Color16) -> std::io::Result<()> {
         self.writer.write_all(color.fg())
     }
 
     #[inline]
-    pub fn bg16(&mut self, color: Color16) -> std::io::Result<()> {
+    pub fn raw_bg16(&mut self, color: Color16) -> std::io::Result<()> {
         self.writer.write_all(color.bg())
+    }
+
+    #[inline]
+    pub fn fg_default(&mut self) -> std::io::Result<()> {
+        if self.inverted {
+            self.raw_bg_default()
+        } else {
+            self.raw_fg_default()
+        }
+    }
+
+    #[inline]
+    pub fn bg_default(&mut self) -> std::io::Result<()> {
+        if self.inverted {
+            self.raw_fg_default()
+        } else {
+            self.raw_bg_default()
+        }
+    }
+
+    #[inline]
+    pub fn fg_rgb(&mut self, color: Rgb) -> std::io::Result<()> {
+        if self.inverted {
+            self.raw_bg_rgb(color)
+        } else {
+            self.raw_fg_rgb(color)
+        }
+    }
+
+    #[inline]
+    pub fn bg_rgb(&mut self, color: Rgb) -> std::io::Result<()> {
+        if self.inverted {
+            self.raw_fg_rgb(color)
+        } else {
+            self.raw_bg_rgb(color)
+        }
+    }
+
+    #[inline]
+    pub fn fg16(&mut self, color: Color16) -> std::io::Result<()> {
+        if self.inverted {
+            self.raw_bg16(color)
+        } else {
+            self.raw_fg16(color)
+        }
+    }
+
+    #[inline]
+    pub fn bg16(&mut self, color: Color16) -> std::io::Result<()> {
+        if self.inverted {
+            self.raw_fg16(color)
+        } else {
+            self.raw_bg16(color)
+        }
     }
 
     #[inline]
@@ -199,12 +256,24 @@ impl TermIO {
         }
     }
 
-    pub fn rich_text(&mut self, row: i32, column: i32, width: u32, height: u32, rich_text: &RichText) -> std::io::Result<()> {
-        if row < 0 && -row as usize >= rich_text.height() {
+    pub fn rich_text(&mut self, row: i32, column: i32, rich_text: &RichText) -> std::io::Result<()> {
+        self.rich_text_cropped(
+            row, column,
+            rich_text.width().min(u32::MAX as usize) as u32,
+            rich_text.height().min(u32::MAX as usize) as u32,
+            rich_text,
+        )
+    }
+
+    pub fn rich_text_cropped(&mut self, row: i32, column: i32, width: u32, height: u32, rich_text: &RichText) -> std::io::Result<()> {
+        let min_height = rich_text.height().min(height as usize);
+        let min_width = rich_text.width().min(width as usize);
+
+        if row < 0 && -row as usize >= min_height {
             return Ok(());
         }
 
-        if column < 0 && -column as usize >= rich_text.width() {
+        if column < 0 && -column as usize >= min_width {
             return Ok(());
         }
 
@@ -216,15 +285,13 @@ impl TermIO {
             return Ok(());
         }
 
-        let min_height = rich_text.height().min(height as usize);
-
         let start_line_index = if row < 0 { -row as usize } else { 0 };
-        let end_line_index = if row < 0 { min_height - -row as usize } else { min_height };
-        let end_line_index = if end_line_index - start_line_index > self.window_size.rows as usize {
-            start_line_index + self.window_size.rows as usize
-        } else {
-            end_line_index
-        };
+        let end_line_index = (start_line_index + height.min(self.window_size.rows) as usize).min(rich_text.height());
+
+        {
+            let mut f = std::fs::OpenOptions::new().append(true).create(true).open("tmp/error.log")?;
+            writeln!(f, ">>> [x{}][{}..{}] row: {row}, height: {height}", rich_text.height(), start_line_index, end_line_index)?;
+        }
 
         let lines = &rich_text.lines()[start_line_index..end_line_index];
 
@@ -237,11 +304,11 @@ impl TermIO {
             let mut moved = false;
             let mut line_width = 0;
             let start_width = if column < 0 { -column as usize } else { 0 };
-            let end_width = if column > 0 {
-                self.window_size.columns as usize - -column as usize
+            let end_width = if column < 0 {
+                (width as usize - -column as usize).min(self.window_size.columns as usize + -column as usize)
             } else {
-                self.window_size.columns as usize
-            }.min(width as usize);
+                (width as usize).min(self.window_size.columns as usize - column as usize)
+            };
 
             for code in line {
                 match code {
@@ -250,23 +317,30 @@ impl TermIO {
                     RichTextCode::TextDecoration(text_decoration) => self.text_decoration(*text_decoration)?,
                     RichTextCode::Foreground(color) => self.fg(*color)?,
                     RichTextCode::Background(color) => self.bg(*color)?,
-                    RichTextCode::Text { text, width } => {
-                        if line_width >= start_width && line_width + width <= end_width {
+                    RichTextCode::Text { text, width: text_width } => {
+                        if line_width >= start_width && line_width + text_width <= end_width {
                             if !moved {
-                                self.move_cursor(start_row, start_column + line_index as u32)?;
+                                self.move_cursor(start_row + line_index as u32, start_column)?;
                                 moved = true;
                             }
 
                             self.write_str(text)?;
-                            line_width += width;
-                        } else if line_width + width >= start_width && line_width < end_width {
+                        } else if line_width + text_width >= start_width && line_width < end_width {
                             if !moved {
-                                self.move_cursor(start_row, start_column + line_index as u32)?;
+                                self.move_cursor(start_row + line_index as u32, start_column)?;
                                 moved = true;
                             }
 
-                            // TODO: crop
+                            let text_start_width = if line_width >= start_width { 0 } else { start_width - line_width };
+                            let text = crop(
+                                text,
+                                text_start_width,
+                                end_width - text_start_width,
+                            );
+                            self.write_str(text)?;
                         }
+
+                        line_width += text_width;
                     }
                 }
             }
@@ -365,6 +439,21 @@ impl TermIO {
         }
 
         Ok(())
+    }
+
+    #[inline]
+    pub fn invert(&mut self) {
+        self.inverted = !self.inverted
+    }
+
+    #[inline]
+    pub fn set_inverted(&mut self, inverted: bool) {
+        self.inverted = inverted;
+    }
+
+    #[inline]
+    pub fn inverted(&self) -> bool {
+        self.inverted
     }
 
     #[inline]
