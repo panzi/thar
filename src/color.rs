@@ -180,6 +180,21 @@ impl Color {
             b: (color         & 0xFF) as u8,
         }
     }
+
+    #[inline]
+    pub fn is_default(&self) -> bool {
+        matches!(self, Color::Default)
+    }
+
+    #[inline]
+    pub fn is_rgb(&self) -> bool {
+        matches!(self, Color::Rgb { .. })
+    }
+
+    #[inline]
+    pub fn is_color16(&self) -> bool {
+        matches!(self, Color::Color16(..))
+    }
 }
 
 impl Default for Color {

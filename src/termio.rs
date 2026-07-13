@@ -1,6 +1,6 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowed_fd::BorrowedFd, char_width::{CharWidth, crop}, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, rich_text::{RichText, RichTextCode}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
+use crate::{borrowed_fd::BorrowedFd, char_width::crop, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, rich_text::{RichText, RichTextCode}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -21,6 +21,8 @@ pub struct TermIO {
     sigwinch_nr: u32,
     mouse_enabled: bool,
     inverted: bool,
+    default_fg: Color,
+    default_bg: Color,
 }
 
 const READ_SIZE: usize = 1024;
@@ -103,6 +105,8 @@ impl TermIO {
             mouse_enabled: false,
             window_size: WindowSize::default(),
             inverted: false,
+            default_fg: Color::Default,
+            default_bg: Color::Default,
         };
 
         app.epoll.add(rfd, Events::In | Events::ReadHangup, 0)?;
@@ -155,13 +159,41 @@ impl TermIO {
     }
 
     #[inline]
+    pub fn default_fg(&self) -> Color {
+        self.default_fg
+    }
+
+    #[inline]
+    pub fn default_bg(&self) -> Color {
+        self.default_bg
+    }
+
+    #[inline]
+    pub fn set_default_fg(&mut self, color: Color) {
+        self.default_fg = color;
+    }
+
+    #[inline]
+    pub fn set_default_bg(&mut self, color: Color) {
+        self.default_bg = color;
+    }
+
+    #[inline]
     pub fn raw_fg_default(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(FG_DEFAULT)
+        match self.default_fg {
+            Color::Default => self.writer.write_all(FG_DEFAULT),
+            Color::Color16(color) => self.raw_fg16(color),
+            Color::Rgb { r, g, b } => self.raw_fg_rgb(Rgb { r, g, b }),
+        }
     }
 
     #[inline]
     pub fn raw_bg_default(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(BG_DEFAULT)
+        match self.default_bg {
+            Color::Default => self.writer.write_all(BG_DEFAULT),
+            Color::Color16(color) => self.raw_bg16(color),
+            Color::Rgb { r, g, b } => self.raw_bg_rgb(Rgb { r, g, b }),
+        }
     }
 
     #[inline]
@@ -288,14 +320,22 @@ impl TermIO {
         let start_line_index = if row < 0 { -row as usize } else { 0 };
         let end_line_index = (start_line_index + height.min(self.window_size.rows) as usize).min(rich_text.height());
 
-        {
-            let mut f = std::fs::OpenOptions::new().append(true).create(true).open("tmp/error.log")?;
-            writeln!(f, ">>> [x{}][{}..{}] row: {row}, height: {height}", rich_text.height(), start_line_index, end_line_index)?;
-        }
+        // {
+        //     let mut f = std::fs::OpenOptions::new().append(true).create(true).open("tmp/error.log")?;
+        //     writeln!(f, ">>> [x{}][{}..{}] row: {row}, height: {height}", rich_text.height(), start_line_index, end_line_index)?;
+        // }
 
         let lines = &rich_text.lines()[start_line_index..end_line_index];
 
         self.clear_style()?;
+
+        if !self.default_fg.is_default() {
+            self.raw_fg_default()?;
+        }
+
+        if !self.default_bg.is_default() {
+            self.raw_bg_default()?;
+        }
 
         let start_row = if row < 0 { 0 } else { row as u32 };
         let start_column = if column < 0 { 0 } else { column as u32 };

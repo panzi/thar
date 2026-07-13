@@ -452,11 +452,11 @@ impl RichText {
         }
     }
 
-    pub fn vertical_append(&mut self, toplevel_style: &RichTextStyle, other: &RichText) {
+    pub fn vertical_append(&mut self, other: &RichText) {
         self.right_pad(self.width);
 
-        let mut self_style = *toplevel_style;
-        let mut other_style = *toplevel_style;
+        let mut self_style = RichTextStyle::default();
+        let mut other_style = RichTextStyle::default();
 
         for (self_line, other_line) in self.lines.iter_mut().zip(other.lines.iter()) {
             self_style.apply_changes(self_line);

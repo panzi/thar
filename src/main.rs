@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{color::{Color, Color16}, event::{Event, Key}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO};
+use crate::{color::Color16, event::{Event, Key}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO};
 
 use clap::Parser;
 
