@@ -1,4 +1,6 @@
-use crate::{char_width::CharWidth, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
+use std::fmt::Write;
+
+use crate::{char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}, termio::TermIO};
 
 /// Simple rich text format, a bit like BB code.
 /// 
@@ -51,6 +53,17 @@ impl RichText {
         new_rich_text.append_rich_text(rich_text)?;
 
         Ok(new_rich_text)
+    }
+
+    pub fn append_line(&mut self) {
+        self.lines.push(Vec::new());
+    }
+
+    pub fn append_lines(&mut self, count: usize) {
+        self.lines.reserve(count);
+        for _ in 0..count {
+            self.lines.push(Vec::new());
+        }
     }
 
     pub fn append(&mut self, other: &RichText) {
@@ -482,6 +495,120 @@ impl RichText {
         }
 
         self.width += other.width;
+    }
+
+    pub fn draw(&self, termio: &mut TermIO, row: i32, column: i32) -> std::io::Result<()> {
+        self.draw_cropped(
+            termio, row, column,
+            self.width.min(u32::MAX as usize) as u32,
+            self.height().min(u32::MAX as usize) as u32,
+        )
+    }
+
+    pub fn draw_cropped(&self, termio: &mut TermIO, row: i32, column: i32, width: u32, height: u32) -> std::io::Result<()> {
+        let min_height = self.height().min(height as usize);
+        let min_width = self.width().min(width as usize);
+
+        if row < 0 && -row as usize >= min_height {
+            return Ok(());
+        }
+
+        if column < 0 && -column as usize >= min_width {
+            return Ok(());
+        }
+
+        let window_size = *termio.window_size();
+        if row > 0 && row as u32 > window_size.rows {
+            return Ok(());
+        }
+
+        if column > 0 && column as u32 > window_size.columns {
+            return Ok(());
+        }
+
+        let start_line_index = if row < 0 { -row as usize } else { 0 };
+        let end_line_index = (start_line_index + height.min(window_size.rows) as usize).min(self.height());
+
+        // {
+        //     let mut f = std::fs::OpenOptions::new().append(true).create(true).open("tmp/error.log")?;
+        //     writeln!(f, ">>> [x{}][{}..{}] row: {row}, height: {height}", rich_text.height(), start_line_index, end_line_index)?;
+        // }
+
+        let lines = &self.lines[start_line_index..end_line_index];
+
+        termio.clear_style()?;
+
+        if !termio.default_fg().is_default() {
+            termio.raw_fg_default()?;
+        }
+
+        if !termio.default_bg().is_default() {
+            termio.raw_bg_default()?;
+        }
+
+        let start_row = if row < 0 { 0 } else { row as u32 };
+        let start_column = if column < 0 { 0 } else { column as u32 };
+
+        for (line_index, line) in lines.iter().enumerate() {
+            let mut moved = false;
+            let mut line_width = 0;
+            let start_width = if column < 0 { -column as usize } else { 0 };
+
+            let end_width = if column < 0 {
+                (width as usize - -column as usize).min(window_size.columns as usize + -column as usize)
+            } else {
+                (width as usize).min(window_size.columns as usize - column as usize)
+            };
+
+            for code in line {
+                match code {
+                    RichTextCode::FontWeight(font_weight) => termio.font_weight(*font_weight)?,
+                    RichTextCode::FontStyle(font_style) => termio.font_style(*font_style)?,
+                    RichTextCode::TextDecoration(text_decoration) => termio.text_decoration(*text_decoration)?,
+                    RichTextCode::Foreground(color) => termio.fg(*color)?,
+                    RichTextCode::Background(color) => termio.bg(*color)?,
+                    RichTextCode::Text { text, width: text_width } => {
+                        if line_width >= start_width && line_width + text_width <= end_width {
+                            if !moved {
+                                //if line_index > 1 && start_column == 1 {
+                                //    termio.write_str("\n")?;
+                                //} else {
+                                    termio.move_cursor(start_row + line_index as u32, start_column)?;
+                                //}
+                                moved = true;
+                            }
+
+                            termio.write_str(text)?;
+                        } else if line_width + text_width >= start_width && line_width < end_width {
+                            if !moved {
+                                //if line_index > 1 && start_column == 1 {
+                                //    termio.write_str("\n")?;
+                                //} else {
+                                    termio.move_cursor(start_row + line_index as u32, start_column)?;
+                                //}
+                                moved = true;
+                            }
+
+                            let text_start_width = if line_width >= start_width { 0 } else { start_width - line_width };
+                            if text_start_width < width as usize {
+                                let text = crop(
+                                    text,
+                                    text_start_width,
+
+                                    // FIXME: bug when text moves out of the window to the left
+                                    width as usize - text_start_width,
+                                );
+                                termio.write_str(text)?;
+                            }
+                        }
+
+                        line_width += text_width;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

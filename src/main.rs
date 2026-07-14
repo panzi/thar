@@ -64,7 +64,7 @@ fn main() -> Result<(), std::io::Error> {
         return Ok(());
     }
 
-    if 1 == 2 {
+    if 1 == 1 {
         let rich_text = "[b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]\n[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg]";
         //let rich_text = "[bg=black][color=white][u]R[/u]equests[/color][/bg]";
         //let rich_text = "[u]R[/u]equests";
@@ -83,7 +83,7 @@ fn main() -> Result<(), std::io::Error> {
         let mut x = 1;
         let mut y = 1;
 
-        termio.rich_text(y, x, &rich_text)?;
+        rich_text.draw(&mut termio, y, x)?;
         termio.flush()?;
 
         while let Some(event) = termio.wait()? {
@@ -116,7 +116,8 @@ fn main() -> Result<(), std::io::Error> {
             }
 
             termio.clear_screen()?;
-            termio.rich_text(y, x, &rich_text)?;
+            termio.flush()?;
+            rich_text.draw(&mut termio, y, x)?;
             termio.flush()?;
         }
 
@@ -171,11 +172,11 @@ fn full_redraw(har: &HAR, termio: &mut TermIO, view_state: &ViewState) -> std::i
 
     termio.set_inverted(matches!(view_state.active_view, ActiveView::EntryList | ActiveView::Entry(_)));
 
-    termio.rich_text(1, 1, &view_state.requests_label)?;
+    view_state.requests_label.draw(termio, 1, 1)?;
 
     termio.set_inverted(matches!(view_state.active_view, ActiveView::PageList | ActiveView::Page(_)));
 
-    termio.rich_text(1, view_state.requests_label.width().min(i32::MAX as usize - 2) as i32 + 2, &view_state.pages_label)?;
+    view_state.pages_label.draw(termio, 1, view_state.requests_label.width().min(i32::MAX as usize - 2) as i32 + 2)?;
 
     termio.set_inverted(false);
 

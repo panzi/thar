@@ -115,8 +115,8 @@ impl TermIO {
         // CSI ?   25 l   Hide cursor (DECTCEM), VT220
         // CSI ?    7 l   No Auto-Wrap Mode (DECAWM), VT100.
         // CSI 2 J        Clear entire screen
-        app.write(b"\x1B[?1049h\x1B[?25l\x1B[?7l\x1B[2J")?;
-        //app.write(b"\x1B[?25l\x1B[?7l\x1B[2J")?;
+        //app.write(b"\x1B[?1049h\x1B[?25l\x1B[?7l\x1B[2J")?;
+        app.write(b"\x1B[?25l\x1B[?7l\x1B[2J")?;
         app.flush()?;
         app.refresh_window_size()?;
 
@@ -286,107 +286,6 @@ impl TermIO {
             Color::Rgb { r, g, b } => self.bg_rgb(Rgb { r, g, b }),
             Color::Color16(color) => self.bg16(color),
         }
-    }
-
-    pub fn rich_text(&mut self, row: i32, column: i32, rich_text: &RichText) -> std::io::Result<()> {
-        self.rich_text_cropped(
-            row, column,
-            rich_text.width().min(u32::MAX as usize) as u32,
-            rich_text.height().min(u32::MAX as usize) as u32,
-            rich_text,
-        )
-    }
-
-    pub fn rich_text_cropped(&mut self, row: i32, column: i32, width: u32, height: u32, rich_text: &RichText) -> std::io::Result<()> {
-        let min_height = rich_text.height().min(height as usize);
-        let min_width = rich_text.width().min(width as usize);
-
-        if row < 0 && -row as usize >= min_height {
-            return Ok(());
-        }
-
-        if column < 0 && -column as usize >= min_width {
-            return Ok(());
-        }
-
-        if row > 0 && row as u32 > self.window_size.rows {
-            return Ok(());
-        }
-
-        if column > 0 && column as u32 > self.window_size.columns {
-            return Ok(());
-        }
-
-        let start_line_index = if row < 0 { -row as usize } else { 0 };
-        let end_line_index = (start_line_index + height.min(self.window_size.rows) as usize).min(rich_text.height());
-
-        // {
-        //     let mut f = std::fs::OpenOptions::new().append(true).create(true).open("tmp/error.log")?;
-        //     writeln!(f, ">>> [x{}][{}..{}] row: {row}, height: {height}", rich_text.height(), start_line_index, end_line_index)?;
-        // }
-
-        let lines = &rich_text.lines()[start_line_index..end_line_index];
-
-        self.clear_style()?;
-
-        if !self.default_fg.is_default() {
-            self.raw_fg_default()?;
-        }
-
-        if !self.default_bg.is_default() {
-            self.raw_bg_default()?;
-        }
-
-        let start_row = if row < 0 { 0 } else { row as u32 };
-        let start_column = if column < 0 { 0 } else { column as u32 };
-
-        for (line_index, line) in lines.iter().enumerate() {
-            let mut moved = false;
-            let mut line_width = 0;
-            let start_width = if column < 0 { -column as usize } else { 0 };
-            let end_width = if column < 0 {
-                (width as usize - -column as usize).min(self.window_size.columns as usize + -column as usize)
-            } else {
-                (width as usize).min(self.window_size.columns as usize - column as usize)
-            };
-
-            for code in line {
-                match code {
-                    RichTextCode::FontWeight(font_weight) => self.font_weight(*font_weight)?,
-                    RichTextCode::FontStyle(font_style) => self.font_style(*font_style)?,
-                    RichTextCode::TextDecoration(text_decoration) => self.text_decoration(*text_decoration)?,
-                    RichTextCode::Foreground(color) => self.fg(*color)?,
-                    RichTextCode::Background(color) => self.bg(*color)?,
-                    RichTextCode::Text { text, width: text_width } => {
-                        if line_width >= start_width && line_width + text_width <= end_width {
-                            if !moved {
-                                self.move_cursor(start_row + line_index as u32, start_column)?;
-                                moved = true;
-                            }
-
-                            self.write_str(text)?;
-                        } else if line_width + text_width >= start_width && line_width < end_width {
-                            if !moved {
-                                self.move_cursor(start_row + line_index as u32, start_column)?;
-                                moved = true;
-                            }
-
-                            let text_start_width = if line_width >= start_width { 0 } else { start_width - line_width };
-                            let text = crop(
-                                text,
-                                text_start_width,
-                                end_width - text_start_width,
-                            );
-                            self.write_str(text)?;
-                        }
-
-                        line_width += text_width;
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 
     #[inline]
