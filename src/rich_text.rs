@@ -338,6 +338,9 @@ impl RichText {
 
                     continue 'outer;
                 } else if ch.is_ascii_control() {
+                    index += char_index;
+                    buf.push_str(&rich_text[old_index..index]);
+
                     if !buf.is_empty() {
                         let text_width = buf.char_width_ignore_unprintable();
                         line_width += text_width;
@@ -368,7 +371,7 @@ impl RichText {
                         CONTROL_STYLE.diff(&current_style, &mut line);
                     }
 
-                    index += char_index + 1;
+                    index += 1;
                     continue 'outer;
                 }
             }
@@ -509,25 +512,31 @@ impl RichText {
         let min_height = self.height().min(height as usize);
         let min_width = self.width().min(width as usize);
 
-        if row < 0 && -row as usize >= min_height {
+        // x/y in this function is 0-based, but row/column in terminals are 1-based
+        let x = column - 1;
+        let y = row - 1;
+
+        if y < 0 && -y as usize >= min_height {
             return Ok(());
         }
 
-        if column < 0 && -column as usize >= min_width {
+        if x < 0 && -x as usize >= min_width {
             return Ok(());
         }
 
         let window_size = *termio.window_size();
-        if row > 0 && row as u32 > window_size.rows {
+        if y >= 0 && y as u32 >= window_size.rows {
             return Ok(());
         }
 
-        if column > 0 && column as u32 > window_size.columns {
+        if x >= 0 && x as u32 >= window_size.columns {
             return Ok(());
         }
 
-        let start_line_index = if row < 0 { -row as usize } else { 0 };
-        let end_line_index = (start_line_index + height.min(window_size.rows) as usize).min(self.height());
+        let start_line_index = if y < 0 { -y as usize } else { 0 };
+        let end_line_index = (start_line_index + height as usize)
+            .min(self.height())
+            .min(window_size.rows as usize - if y >= 0 { y as usize } else { 0 });
 
         // {
         //     let mut f = std::fs::OpenOptions::new().append(true).create(true).open("tmp/error.log")?;
@@ -546,19 +555,18 @@ impl RichText {
             termio.raw_bg_default()?;
         }
 
-        let start_row = if row < 0 { 0 } else { row as u32 };
-        let start_column = if column < 0 { 0 } else { column as u32 };
+        let start_row = if row < 1 { 1 } else { row as u32 };
+        let start_column = if column < 1 { 1 } else { column as u32 };
+        let start_width = if column < 1 { 1 + -column as usize } else { 0 };
+        let end_width = if column < 1 {
+            (width as usize).min(window_size.columns as usize) + -(column - 1) as usize
+        } else {
+            (width as usize).min(window_size.columns as usize - (column - 1) as usize)
+        };
 
         for (line_index, line) in lines.iter().enumerate() {
             let mut moved = false;
             let mut line_width = 0;
-            let start_width = if column < 0 { -column as usize } else { 0 };
-
-            let end_width = if column < 0 {
-                (width as usize - -column as usize).min(window_size.columns as usize + -column as usize)
-            } else {
-                (width as usize).min(window_size.columns as usize - column as usize)
-            };
 
             for code in line {
                 match code {
@@ -596,7 +604,7 @@ impl RichText {
                                     text_start_width,
 
                                     // FIXME: bug when text moves out of the window to the left
-                                    width as usize - text_start_width,
+                                    if column < 0 { end_width + -column as usize } else { end_width },
                                 );
                                 termio.write_str(text)?;
                             }

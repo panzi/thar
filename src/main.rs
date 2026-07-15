@@ -65,7 +65,11 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if 1 == 1 {
-        let rich_text = "[b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]\n[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg]";
+        let rich_text = "\
+[b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]\n[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg]
+This is a long line demonstrating how things are truncated.
+A second long line to verify this works for all lines.
+A last line.";
         //let rich_text = "[bg=black][color=white][u]R[/u]equests[/color][/bg]";
         //let rich_text = "[u]R[/u]equests";
         let mut rich_text = match RichText::parse(rich_text) {
@@ -76,15 +80,19 @@ fn main() -> Result<(), std::io::Error> {
                 std::process::exit(1);
             }
         };
-        rich_text.append_plain_text(&format!("\n{:#?}", rich_text));
+        //rich_text.append_plain_text(&format!("\n{:#?}", rich_text));
 
         let mut termio = termio::TermIO::from_stdio()?;
 
         let mut x = 1;
         let mut y = 1;
 
-        rich_text.draw(&mut termio, y, x)?;
-        termio.flush()?;
+        {
+            let mut rich_text = rich_text.clone();
+            rich_text.append_plain_text(&format!("\nrow: {y}, column: {x}"));
+            rich_text.draw(&mut termio, y, x)?;
+            termio.flush()?;
+        }
 
         while let Some(event) = termio.wait()? {
             match event {
@@ -117,6 +125,8 @@ fn main() -> Result<(), std::io::Error> {
 
             termio.clear_screen()?;
             termio.flush()?;
+            let mut rich_text = rich_text.clone();
+            rich_text.append_plain_text(&format!("\nrow: {y}, column: {x}"));
             rich_text.draw(&mut termio, y, x)?;
             termio.flush()?;
         }
