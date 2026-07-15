@@ -563,6 +563,8 @@ impl RichText {
         } else {
             (width as usize).min(window_size.columns as usize - x as usize)
         };
+        let mut first = true;
+        let mut prev_line_index = 0;
 
         for (line_index, line) in lines.iter().enumerate() {
             let mut moved = false;
@@ -577,25 +579,29 @@ impl RichText {
                     RichTextCode::Background(color) => termio.bg(*color)?,
                     RichTextCode::Text { text, width: text_width } => {
                         let text_width = *text_width;
-                        /*if line_width >= start_width && line_width + text_width <= end_width {
+                        if line_width >= start_width && line_width + text_width <= end_width {
                             if !moved {
-                                //if line_index > 1 && start_column == 1 {
-                                //    termio.write_str("\n")?;
-                                //} else {
+                                if !first && start_column == 1 && prev_line_index + 1 == line_index {
+                                    termio.write_str("\n")?;
+                                } else {
+                                    first = false;
                                     termio.move_cursor(start_row + line_index as u32, start_column)?;
-                                //}
+                                }
                                 moved = true;
+                                prev_line_index = line_index;
                             }
 
                             termio.write_str(text)?;
-                        } else*/ if line_width + text_width >= start_width && line_width < end_width {
+                        } else if line_width + text_width >= start_width && line_width < end_width {
                             if !moved {
-                                //if line_index > 1 && start_column == 1 {
-                                //    termio.write_str("\n")?;
-                                //} else {
+                                if !first && start_column == 1 && prev_line_index + 1 == line_index {
+                                    termio.write_str("\n")?;
+                                } else {
+                                    first = false;
                                     termio.move_cursor(start_row + line_index as u32, start_column)?;
-                                //}
+                                }
                                 moved = true;
+                                prev_line_index = line_index;
                             }
 
                             let text_start_width = if line_width >= start_width { 0 } else { start_width - line_width };
