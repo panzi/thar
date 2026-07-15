@@ -88,26 +88,34 @@ impl CharWidth for char {
 }
 
 pub fn crop(text: &str, start_width: usize, end_width: usize) -> &str {
+    if end_width <= start_width {
+        return "";
+    }
+
     let mut chars = text.char_indices();
     let mut start_index = text.len();
     let mut end_index = text.len();
 
     let mut width = 0;
 
-    while let Some((index, c)) = chars.next() {
-        width += c.char_width_ignore_unprintable();
-        if width >= start_width {
-            start_index = index;
-            break;
+    if start_width == 0 {
+        start_index = 0;
+    } else {
+        while let Some((index, c)) = chars.next() {
+            width += c.char_width_ignore_unprintable();
+            if width > start_width {
+                start_index = index;
+                break;
+            }
         }
     }
 
-    if width > end_width {
+    if width >= end_width {
         end_index = start_index;
     } else {
         for (index, c) in chars {
             width += c.char_width_ignore_unprintable();
-            if width > end_width {
+            if width >= end_width {
                 end_index = index;
                 break;
             }

@@ -555,13 +555,13 @@ impl RichText {
             termio.raw_bg_default()?;
         }
 
-        let start_row = if row < 1 { 1 } else { row as u32 };
-        let start_column = if column < 1 { 1 } else { column as u32 };
-        let start_width = if column < 1 { 1 + -column as usize } else { 0 };
-        let end_width = if column < 1 {
-            (width as usize).min(window_size.columns as usize) + -(column - 1) as usize
+        let start_row = if y < 0 { 1 } else { y as u32 + 1 };
+        let start_column = if x < 0 { 1 } else { x as u32 + 1 };
+        let start_width = if x < 0 { -x as usize } else { 0 };
+        let end_width = if x < 0 {
+            (width as usize).min(window_size.columns as usize + -x as usize)
         } else {
-            (width as usize).min(window_size.columns as usize - (column - 1) as usize)
+            (width as usize).min(window_size.columns as usize - x as usize)
         };
 
         for (line_index, line) in lines.iter().enumerate() {
@@ -576,7 +576,8 @@ impl RichText {
                     RichTextCode::Foreground(color) => termio.fg(*color)?,
                     RichTextCode::Background(color) => termio.bg(*color)?,
                     RichTextCode::Text { text, width: text_width } => {
-                        if line_width >= start_width && line_width + text_width <= end_width {
+                        let text_width = *text_width;
+                        /*if line_width >= start_width && line_width + text_width <= end_width {
                             if !moved {
                                 //if line_index > 1 && start_column == 1 {
                                 //    termio.write_str("\n")?;
@@ -587,7 +588,7 @@ impl RichText {
                             }
 
                             termio.write_str(text)?;
-                        } else if line_width + text_width >= start_width && line_width < end_width {
+                        } else*/ if line_width + text_width >= start_width && line_width < end_width {
                             if !moved {
                                 //if line_index > 1 && start_column == 1 {
                                 //    termio.write_str("\n")?;
@@ -598,14 +599,13 @@ impl RichText {
                             }
 
                             let text_start_width = if line_width >= start_width { 0 } else { start_width - line_width };
-                            if text_start_width < width as usize {
+                            if end_width > text_start_width && text_start_width < text_width {
                                 let text = crop(
                                     text,
                                     text_start_width,
-
-                                    // FIXME: bug when text moves out of the window to the left
-                                    if column < 0 { end_width + -column as usize } else { end_width },
+                                    end_width + 1,
                                 );
+                                //termio.write_str(&format!("{text_start_width} "))?;
                                 termio.write_str(text)?;
                             }
                         }
