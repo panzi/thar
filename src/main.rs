@@ -39,8 +39,8 @@ impl Default for ActiveView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ViewState {
-    scroll_column: u32,
-    scroll_row: u32,
+    scroll_column: i32,
+    scroll_row: i32,
     active_view: ActiveView,
     entry_index: u32,
     page_index: u32,
@@ -149,7 +149,7 @@ A last line.";
         serde_json::from_reader(std::io::stdin())?
     };
 
-    let mut termio = termio::TermIO::from_stdio()?;
+    let mut termio = termio::TermIO::from_tty()?;
     let mut view_state = ViewState::default();
 
     view_state.scroll_row = 1;
@@ -203,22 +203,22 @@ A last line.";
                 break;
             }
             Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
-                if view_state.scroll_row > 1 {
+                if view_state.scroll_row > i32::MIN {
                     view_state.scroll_row -= 1;
                 }
             }
             Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
-                if view_state.scroll_row < u32::MAX {
+                if view_state.scroll_row < i32::MAX {
                     view_state.scroll_row += 1;
                 }
             }
             Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
-                if view_state.scroll_column > 1 {
+                if view_state.scroll_column > i32::MIN {
                     view_state.scroll_column -= 1;
                 }
             }
             Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
-                if view_state.scroll_column < u32::MAX {
+                if view_state.scroll_column < i32::MAX {
                     view_state.scroll_column += 1;
                 }
             }

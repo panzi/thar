@@ -140,7 +140,15 @@ impl Table {
         &mut self.columns
     }
 
-    pub fn redraw(&self, termio: &mut TermIO, row: i32, column: i32, width: u32, height: u32, scroll_row: u32, scroll_column: u32, selected_row_index: usize) -> std::io::Result<()> {
+    pub fn redraw(&self, termio: &mut TermIO, row: i32, column: i32, width: u32, height: u32, scroll_row: i32, scroll_column: i32, selected_row_index: usize) -> std::io::Result<()> {
+        let end_height = height as i32 + scroll_row;
+
+        if end_height < 0 {
+            return Ok(());
+        }
+
+        let end_height = end_height as usize;
+
         let even_bg = Color::from_u32(0x555555);
         let odd_bg = Color::Color16(Color16::Black);
         let fg = Color::Color16(Color16::White);
@@ -178,8 +186,6 @@ impl Table {
             acc_height += row_height;
             current_row_index += 1;
         }
-
-        let end_height = height as usize + scroll_row as usize;
 
         while current_row_index < self.formatted_rows.len() {
             if acc_height >= end_height {
