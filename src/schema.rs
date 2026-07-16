@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use time::OffsetDateTime;
+use url::Url;
 
 // http://www.softwareishard.com/blog/har-12-spec/
 #[derive(Deserialize, Clone, Default, Debug)]
@@ -65,10 +66,10 @@ fn unavailable_i64() -> i64 {
     -1
 }
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct Request {
     pub method: String,
-    pub url: String,
+    pub url: Url,
     #[serde(rename = "httpVersion")]
     pub http_version: String,
     #[serde(default)]
@@ -99,7 +100,7 @@ pub struct Response {
     pub headers: Vec<Header>,
     pub content: Option<Content>,
     #[serde(rename = "redirectURL")]
-    pub redirect_url: Option<String>,
+    pub redirect_url: Option<Url>,
     #[serde(rename = "headersSize", default = "unavailable_i64")]
     pub headers_size: i64,
     #[serde(rename = "bodySize", default = "unavailable_i64")]

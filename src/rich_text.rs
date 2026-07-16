@@ -1,6 +1,4 @@
-use std::fmt::Write;
-
-use crate::{char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}, termio::TermIO};
+use crate::{char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration}, termio::TermIO};
 
 /// Simple rich text format, a bit like BB code.
 /// 
@@ -500,6 +498,12 @@ impl RichText {
         self.width += other.width;
     }
 
+    #[inline]
+    pub fn clear(&mut self) {
+        self.lines.clear();
+        self.width = 0;
+    }
+
     pub fn draw(&self, termio: &mut TermIO, row: i32, column: i32) -> std::io::Result<()> {
         self.draw_cropped(
             termio, row, column,
@@ -547,13 +551,8 @@ impl RichText {
 
         termio.clear_style()?;
 
-        if !termio.default_fg().is_default() {
-            termio.raw_fg_default()?;
-        }
-
-        if !termio.default_bg().is_default() {
-            termio.raw_bg_default()?;
-        }
+        termio.fg_default()?;
+        termio.bg_default()?;
 
         let start_row = if y < 0 { 1 } else { y as u32 + 1 };
         let start_column = if x < 0 { 1 } else { x as u32 + 1 };
@@ -775,32 +774,6 @@ impl RichTextStyle {
                 }
                 RichTextCode::Text { .. } => {}
             }
-        }
-    }
-}
-
-impl From<&TextStyle> for RichTextStyle {
-    #[inline]
-    fn from(value: &TextStyle) -> Self {
-        Self {
-            font_weight: value.font_weight.unwrap_or_default(),
-            text_decoration: value.text_decoration.unwrap_or_default(),
-            font_style: value.font_style.unwrap_or_default(),
-            foreground: value.foreground.unwrap_or_default(),
-            background: value.background.unwrap_or_default(),
-        }
-    }
-}
-
-impl From<&RichTextStyle> for TextStyle {
-    #[inline]
-    fn from(value: &RichTextStyle) -> Self {
-        Self {
-            font_weight: Some(value.font_weight),
-            text_decoration: Some(value.text_decoration),
-            font_style: Some(value.font_style),
-            foreground: Some(value.foreground),
-            background: Some(value.background),
         }
     }
 }

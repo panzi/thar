@@ -1,6 +1,6 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowed_fd::BorrowedFd, char_width::crop, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, rich_text::{RichText, RichTextCode}, style::{FontStyle, FontWeight, TextDecoration, TextStyle}};
+use crate::{borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, style::{FontStyle, FontWeight, TextDecoration}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -179,24 +179,6 @@ impl TermIO {
     }
 
     #[inline]
-    pub fn raw_fg_default(&mut self) -> std::io::Result<()> {
-        match self.default_fg {
-            Color::Default => self.writer.write_all(FG_DEFAULT),
-            Color::Color16(color) => self.raw_fg16(color),
-            Color::Rgb { r, g, b } => self.raw_fg_rgb(Rgb { r, g, b }),
-        }
-    }
-
-    #[inline]
-    pub fn raw_bg_default(&mut self) -> std::io::Result<()> {
-        match self.default_bg {
-            Color::Default => self.writer.write_all(BG_DEFAULT),
-            Color::Color16(color) => self.raw_bg16(color),
-            Color::Rgb { r, g, b } => self.raw_bg_rgb(Rgb { r, g, b }),
-        }
-    }
-
-    #[inline]
     pub fn raw_fg_rgb(&mut self, Rgb { r, g, b }: Rgb) -> std::io::Result<()> {
         write!(self.writer, "\x1B[38;2;{r};{g};{b}m")
     }
@@ -217,20 +199,38 @@ impl TermIO {
     }
 
     #[inline]
+    pub fn raw_fg(&mut self, color: Color) -> std::io::Result<()> {
+        match color {
+            Color::Default => self.writer.write_all(FG_DEFAULT),
+            Color::Color16(color) => self.raw_fg16(color),
+            Color::Rgb { r, g, b } => self.raw_fg_rgb(Rgb { r, g, b }),
+        }
+    }
+
+    #[inline]
+    pub fn raw_bg(&mut self, color: Color) -> std::io::Result<()> {
+        match color {
+            Color::Default => self.writer.write_all(BG_DEFAULT),
+            Color::Color16(color) => self.raw_bg16(color),
+            Color::Rgb { r, g, b } => self.raw_bg_rgb(Rgb { r, g, b }),
+        }
+    }
+
+    #[inline]
     pub fn fg_default(&mut self) -> std::io::Result<()> {
         if self.inverted {
-            self.raw_bg_default()
+            self.raw_bg(self.default_fg)
         } else {
-            self.raw_fg_default()
+            self.raw_fg(self.default_fg)
         }
     }
 
     #[inline]
     pub fn bg_default(&mut self) -> std::io::Result<()> {
         if self.inverted {
-            self.raw_fg_default()
+            self.raw_fg(self.default_bg)
         } else {
-            self.raw_bg_default()
+            self.raw_bg(self.default_bg)
         }
     }
 
@@ -354,30 +354,6 @@ impl TermIO {
             FontStyle::Normal => self.not_italic(),
             FontStyle::Italic => self.italic(),
         }
-    }
-
-    pub fn text_style(&mut self, style: &TextStyle) -> std::io::Result<()> {
-        if let Some(font_weight) = style.font_weight {
-            self.font_weight(font_weight)?;
-        }
-
-        if let Some(text_decoration) = style.text_decoration {
-            self.text_decoration(text_decoration)?;
-        }
-
-        if let Some(font_style) = style.font_style {
-            self.font_style(font_style)?;
-        }
-
-        if let Some(fg) = style.foreground {
-            self.fg(fg)?;
-        }
-
-        if let Some(bg) = style.background {
-            self.fg(bg)?;
-        }
-
-        Ok(())
     }
 
     #[inline]

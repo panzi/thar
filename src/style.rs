@@ -1,4 +1,4 @@
-use crate::color::Color;
+use crate::{color::Color, termio::TermIO};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontWeight {
@@ -41,77 +41,102 @@ impl Default for FontStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct TextStyle {
-    pub font_weight: Option<FontWeight>,
-    pub text_decoration: Option<TextDecoration>,
-    pub font_style: Option<FontStyle>,
-    pub foreground: Option<Color>,
-    pub background: Option<Color>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TermIOState {
+    None,
+    DefaultForeground(Color),
+    DefaultBackground(Color),
+    Inverted(bool),
 }
 
-impl TextStyle {
-    #[inline]
-    pub fn build() -> TextStyleBuilder {
-        TextStyleBuilder::default()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct TextStyleBuilder {
-    inner: TextStyle
-}
-
-impl TextStyleBuilder {
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[inline]
-    pub fn inner(&self) -> &TextStyle {
-        &self.inner
-    }
-
-    #[inline]
-    pub fn into_inner(self) -> TextStyle {
-        self.inner
-    }
-
-    #[inline]
-    pub fn font_weight(mut self, font_weight: FontWeight) -> Self {
-        self.inner.font_weight = Some(font_weight);
-        self
-    }
-
-    #[inline]
-    pub fn text_decoration(mut self, text_decoration: TextDecoration) -> Self {
-        self.inner.text_decoration = Some(text_decoration);
-        self
-    }
-
-    #[inline]
-    pub fn font_style(mut self, font_style: FontStyle) -> Self {
-        self.inner.font_style = Some(font_style);
-        self
-    }
-
-    #[inline]
-    pub fn foreground(mut self, foreground: Color) -> Self {
-        self.inner.foreground = Some(foreground);
-        self
-    }
-
-    #[inline]
-    pub fn background(mut self, background: Color) -> Self {
-        self.inner.background = Some(background);
-        self
+impl TermIOState {
+    pub fn apply(&self, termio: &mut TermIO) {
+        match self {
+            Self::None => {},
+            Self::DefaultForeground(color) => termio.set_default_fg(*color),
+            Self::DefaultBackground(color) => termio.set_default_bg(*color),
+            Self::Inverted(inverted) => termio.set_inverted(*inverted),
+        }
     }
 }
 
-impl From<TextStyleBuilder> for TextStyle {
+#[derive(Debug)]
+pub struct ScopedTermIOState<'a> {
+    termio: &'a mut TermIO,
+    old_state: TermIOState,
+}
+
+impl<'a> ScopedTermIOState<'a> {
     #[inline]
-    fn from(value: TextStyleBuilder) -> Self {
-        value.into_inner()
+    pub fn none(termio: &'a mut TermIO) -> Self {
+        Self { termio, old_state: TermIOState::None }
+    }
+
+    #[inline]
+    pub fn default_fg(termio: &'a mut TermIO, color: Color) -> Self {
+        let old_state = TermIOState::DefaultForeground(termio.default_fg());
+        termio.set_default_fg(color);
+        Self { termio, old_state }
+    }
+
+    #[inline]
+    pub fn default_bg(termio: &'a mut TermIO, color: Color) -> Self {
+        let old_state = TermIOState::DefaultBackground(termio.default_bg());
+        termio.set_default_bg(color);
+        Self { termio, old_state }
+    }
+
+    #[inline]
+    pub fn invert(termio: &'a mut TermIO) -> Self {
+        let inverted = termio.inverted();
+        let old_state = TermIOState::Inverted(inverted);
+        termio.set_inverted(!inverted);
+        Self { termio, old_state }
+    }
+
+    #[inline]
+    pub fn inverted(termio: &'a mut TermIO, inverted: bool) -> Self {
+        let old_state = TermIOState::Inverted(termio.inverted());
+        termio.set_inverted(inverted);
+        Self { termio, old_state }
+    }
+
+    #[inline]
+    pub fn new(termio: &'a mut TermIO, style: TermIOState) -> Self {
+        match style {
+            TermIOState::None => {
+                Self::none(termio)
+            },
+            TermIOState::DefaultForeground(color) => {
+                Self::default_fg(termio, color)
+            },
+            TermIOState::DefaultBackground(color) => {
+                Self::default_bg(termio, color)
+            },
+            TermIOState::Inverted(inverted) => {
+                Self::inverted(termio, inverted)
+            },
+        }
+    }
+
+    #[inline]
+    pub fn termio(&self) -> &TermIO {
+        self.termio
+    }
+
+    #[inline]
+    pub fn termio_mut(&mut self) -> &mut TermIO {
+        self.termio
+    }
+
+    #[inline]
+    pub fn old_state(&self) -> TermIOState {
+        self.old_state
+    }
+}
+
+impl Drop for ScopedTermIOState<'_> {
+    fn drop(&mut self) {
+        self.old_state.apply(self.termio);
     }
 }

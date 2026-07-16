@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{color::Color16, event::{Event, Key}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO};
+use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, RequestField, ResponseField}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO, widgets::table::Table};
 
 use clap::Parser;
 
@@ -14,6 +14,7 @@ pub mod char_width;
 pub mod widgets;
 pub mod style;
 pub mod rich_text;
+pub mod fields;
 
 #[derive(Parser)]
 struct Args {
@@ -38,13 +39,15 @@ impl Default for ActiveView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ViewState {
-    scroll_x: u32,
-    scroll_y: u32,
+    scroll_column: u32,
+    scroll_row: u32,
     active_view: ActiveView,
     entry_index: u32,
     page_index: u32,
     requests_label: RichText,
     pages_label: RichText,
+    entries_table: Table,
+    pages_table: Table,
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -64,7 +67,7 @@ fn main() -> Result<(), std::io::Error> {
         return Ok(());
     }
 
-    if 1 == 1 {
+    if 1 == 2 {
         let rich_text = "\
 [b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]\n[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg]
 This is a long line demonstrating how things are truncated.
@@ -149,35 +152,90 @@ A last line.";
     let mut termio = termio::TermIO::from_stdio()?;
     let mut view_state = ViewState::default();
 
+    view_state.scroll_row = 1;
+    view_state.scroll_column = 1;
+
     view_state.requests_label.append_rich_text("[bg=black][color=white][u]R[/u]equests[/color][/bg]").unwrap();
     view_state.pages_label.append_rich_text("[bg=black][color=white][u]P[/u]ages[/color][/bg]").unwrap();
 
-    full_redraw(&har, &mut termio, &view_state)?;
+    let entry_columns = [
+        EntryField::Request(RequestField::Method),
+        EntryField::Request(RequestField::Url),
+        EntryField::Response(ResponseField::Status),
+        EntryField::Response(ResponseField::StatusText),
+        EntryField::Response(ResponseField::Content(ContentField::MimeType)),
+        EntryField::Response(ResponseField::HeadersSize),
+        EntryField::Response(ResponseField::BodySize),
+        EntryField::StartedDateTime,
+        EntryField::Time,
+    ];
+
+    view_state.entries_table.set_columns(entry_columns.map(Into::into));
+
+    let mut buf = String::new();
+    for entry in &har.log.entries {
+        let mut row = Vec::new();
+        for column in &entry_columns {
+            buf.clear();
+
+            let mut cell = RichText::new();
+            column.write_rich_text(entry, &mut cell, &mut buf).unwrap();
+
+            row.push(cell);
+        }
+        view_state.entries_table.rows_mut().push(row);
+    }
+
+    view_state.entries_table.format();
+
+    full_redraw(&mut termio, &view_state)?;
 
     while let Some(event) = termio.wait()? {
         match event {
-            Event::WindowSize { .. } => {
-                full_redraw(&har, &mut termio, &view_state)?;
-            }
+            Event::WindowSize { .. } => {}
             Event::KeyPress { key: Key::Char('r'), alt: true, ctrl: false, shift: false } => {
                 view_state.active_view = ActiveView::EntryList;
-                full_redraw(&har, &mut termio, &view_state)?;
             }
             Event::KeyPress { key: Key::Char('p'), alt: true, ctrl: false, shift: false } => {
                 view_state.active_view = ActiveView::PageList;
-                full_redraw(&har, &mut termio, &view_state)?;
             }
             Event::KeyPress { key: Key::Char('q'), alt: false, ctrl: false, shift: false } => {
                 break;
             }
+            Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
+                if view_state.scroll_row > 1 {
+                    view_state.scroll_row -= 1;
+                }
+            }
+            Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
+                if view_state.scroll_row < u32::MAX {
+                    view_state.scroll_row += 1;
+                }
+            }
+            Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
+                if view_state.scroll_column > 1 {
+                    view_state.scroll_column -= 1;
+                }
+            }
+            Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
+                if view_state.scroll_column < u32::MAX {
+                    view_state.scroll_column += 1;
+                }
+            }
             _ => {}
         }
+
+        full_redraw(&mut termio, &view_state)?;
     }
+
+    //drop(termio);
+    //println!("{:#?}", view_state.entries_table);
 
     Ok(())
 }
 
-fn full_redraw(har: &HAR, termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<()> {
+fn full_redraw(termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<()> {
+    termio.clear_style()?;
     termio.clear_screen()?;
 
     termio.set_inverted(matches!(view_state.active_view, ActiveView::EntryList | ActiveView::Entry(_)));
@@ -190,22 +248,34 @@ fn full_redraw(har: &HAR, termio: &mut TermIO, view_state: &ViewState) -> std::i
 
     termio.set_inverted(false);
 
-    termio.flush()?;
+    let window_size = *termio.window_size();
 
-    match view_state.active_view {
-        ActiveView::EntryList => {
+    if window_size.rows > 0 {
+        match view_state.active_view {
+            ActiveView::EntryList => {
+                view_state.entries_table.redraw(
+                    termio,
+                    2, 1,
+                    window_size.columns, window_size.rows - 1,
+                    view_state.scroll_row,
+                    view_state.scroll_column,
+                    view_state.entry_index as usize,
+                )?;
+            }
+            ActiveView::PageList => {
 
-        }
-        ActiveView::PageList => {
+            }
+            ActiveView::Entry(index) => {
 
-        }
-        ActiveView::Entry(index) => {
+            }
+            ActiveView::Page(index) => {
 
-        }
-        ActiveView::Page(index) => {
-
+            }
         }
     }
+
+    termio.set_default_fg(Color::Default);
+    termio.set_default_bg(Color::Default);
 
     termio.flush()?;
 
