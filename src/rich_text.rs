@@ -519,36 +519,6 @@ impl RichText {
         let mut crop_row_end = crop_row + crop_height as usize;
         let mut crop_column_end = crop_column + crop_width as usize;
 
-        let window_size = *termio.window_size();
-
-        if crop_row >= self.height() {
-            return Ok(());
-        }
-
-        if crop_column >= self.width() {
-            return Ok(());
-        }
-
-        if row < 0 {
-            if crop_row_end < -row as usize {
-                return Ok(());
-            }
-        } else {
-            if row as u32 > window_size.rows {
-                return Ok(());
-            }
-        }
-
-        if column < 0 {
-            if crop_column_end < -column as usize {
-                return Ok(());
-            }
-        } else {
-            if column as u32 > window_size.columns {
-                return Ok(());
-            }
-        }
-
         if crop_row_end > self.height() {
             crop_row_end = self.height();
         }
@@ -557,38 +527,64 @@ impl RichText {
             crop_column_end = self.width();
         }
 
+        if crop_row >= crop_row_end {
+            return Ok(());
+        }
+
+        if crop_column >= crop_column_end {
+            return Ok(());
+        }
+
+        let window_size = *termio.window_size();
+
+        let term_row;
+        let term_column;
+
         if row < 0 {
+            if crop_row_end < -row as usize {
+                return Ok(());
+            }
+
             let max_rows = -row as usize + window_size.rows as usize;
             if crop_row_end > max_rows {
                 crop_row_end = max_rows;
             }
 
-            if crop_row < -row as usize {
-                crop_row = -row as usize;
-            }
+            crop_row += -row as usize;
+            term_row = 0;
         } else {
-            if row as usize + crop_row_end > window_size.rows as usize {
-                crop_row_end = window_size.rows as usize - row as usize; // XXX: overflow
+            if row as u32 > window_size.rows {
+                return Ok(());
             }
+
+            if row as usize + crop_row_end > window_size.rows as usize {
+                crop_row_end = window_size.rows as usize - row as usize;
+            }
+            term_row = row as u32;
         }
 
         if column < 0 {
+            if crop_column_end < -column as usize {
+                return Ok(());
+            }
+
             let max_columns = -column as usize + window_size.columns as usize;
             if crop_column_end > max_columns {
                 crop_column_end = max_columns;
             }
 
-            if crop_column < -column as usize {
-                crop_column = -column as usize;
-            }
+            crop_column += -column as usize;
+            term_column = 0;
         } else {
+            if column as u32 > window_size.columns {
+                return Ok(());
+            }
+
             if column as usize + crop_column_end > window_size.columns as usize {
                 crop_column_end = window_size.columns as usize - column as usize;
             }
+            term_column = column as u32;
         }
-
-        let term_row = (crop_row as i32 + row) as u32;
-        let term_column = (crop_column as i32 + column) as u32;
 
         let lines = &self.lines[crop_row..crop_row_end];
 
