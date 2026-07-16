@@ -373,7 +373,7 @@ impl TermIO {
 
     #[inline]
     pub fn move_cursor(&mut self, row: u32, column: u32) -> std::io::Result<()> {
-        write!(self.writer, "\x1B[{row};{column}H")
+        write!(self.writer, "\x1B[{};{}H", row + 1, column + 1)
     }
 
     #[inline]

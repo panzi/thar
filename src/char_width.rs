@@ -114,11 +114,11 @@ pub fn crop(text: &str, start_width: usize, end_width: usize) -> &str {
         end_index = start_index;
     } else {
         for (index, c) in chars {
-            width += c.char_width_ignore_unprintable();
             if width >= end_width {
                 end_index = index;
                 break;
             }
+            width += c.char_width_ignore_unprintable();
         }
     }
 

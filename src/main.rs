@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, RequestField, ResponseField}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO, widgets::table::Table};
+use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, RequestField, ResponseField}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO, table::Table};
 
 use clap::Parser;
 
@@ -11,10 +11,10 @@ pub mod epoll;
 pub mod borrowed_fd;
 pub mod color;
 pub mod char_width;
-pub mod widgets;
 pub mod style;
 pub mod rich_text;
 pub mod fields;
+pub mod table;
 
 #[derive(Parser)]
 struct Args {
@@ -67,7 +67,7 @@ fn main() -> Result<(), std::io::Error> {
         return Ok(());
     }
 
-    if 1 == 2 {
+    if 1 == 1 {
         let rich_text = "\
 [b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]\n[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg]
 This is a long line demonstrating how things are truncated.
@@ -87,13 +87,13 @@ A last line.";
 
         let mut termio = termio::TermIO::from_stdio()?;
 
-        let mut x = 1;
-        let mut y = 1;
+        let mut column = 0;
+        let mut row = 0;
 
         {
             let mut rich_text = rich_text.clone();
-            rich_text.append_plain_text(&format!("\nrow: {y}, column: {x}"));
-            rich_text.draw(&mut termio, y, x)?;
+            rich_text.append_plain_text(&format!("\nrow: {row}, column: {column}"));
+            rich_text.draw(&mut termio, row, column)?;
             termio.flush()?;
         }
 
@@ -101,16 +101,16 @@ A last line.";
             match event {
                 Event::WindowSize { rows: _, columns: _ } => {}
                 Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
-                    x -= 1;
+                    column -= 1;
                 }
                 Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
-                    x += 1;
+                    column += 1;
                 }
                 Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
-                    y -= 1;
+                    row -= 1;
                 }
                 Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
-                    y += 1;
+                    row += 1;
                 }
                 Event::KeyPress { key: Key::Char('q'), alt: false, ctrl: false, shift: false } => {
                     break;
@@ -129,8 +129,8 @@ A last line.";
             termio.clear_screen()?;
             termio.flush()?;
             let mut rich_text = rich_text.clone();
-            rich_text.append_plain_text(&format!("\nrow: {y}, column: {x}"));
-            rich_text.draw(&mut termio, y, x)?;
+            rich_text.append_plain_text(&format!("\nrow: {row}, column: {column}"));
+            rich_text.draw(&mut termio, row, column)?;
             termio.flush()?;
         }
 
@@ -151,9 +151,6 @@ A last line.";
 
     let mut termio = termio::TermIO::from_tty()?;
     let mut view_state = ViewState::default();
-
-    view_state.scroll_row = 1;
-    view_state.scroll_column = 1;
 
     view_state.requests_label.append_rich_text("[bg=black][color=white][u]R[/u]equests[/color][/bg]").unwrap();
     view_state.pages_label.append_rich_text("[bg=black][color=white][u]P[/u]ages[/color][/bg]").unwrap();
@@ -240,11 +237,11 @@ fn full_redraw(termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<(
 
     termio.set_inverted(matches!(view_state.active_view, ActiveView::EntryList | ActiveView::Entry(_)));
 
-    view_state.requests_label.draw(termio, 1, 1)?;
+    view_state.requests_label.draw(termio, 0, 0)?;
 
     termio.set_inverted(matches!(view_state.active_view, ActiveView::PageList | ActiveView::Page(_)));
 
-    view_state.pages_label.draw(termio, 1, view_state.requests_label.width().min(i32::MAX as usize - 2) as i32 + 2)?;
+    view_state.pages_label.draw(termio, 0, view_state.requests_label.width().min(i32::MAX as usize - 1) as i32 + 1)?;
 
     termio.set_inverted(false);
 
@@ -255,7 +252,7 @@ fn full_redraw(termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<(
             ActiveView::EntryList => {
                 view_state.entries_table.redraw(
                     termio,
-                    2, 1,
+                    1, 0,
                     window_size.columns, window_size.rows - 1,
                     view_state.scroll_row,
                     view_state.scroll_column,

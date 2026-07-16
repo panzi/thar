@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schema::{CacheState, Entry}, widgets::table::{Align, ColumnDef}};
+use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schema::{CacheState, Entry}, table::{Align, ColumnDef}};
 
 use std::fmt::Write;
 

@@ -121,12 +121,12 @@ pub struct Rgb {
 
 impl Rgb {
     #[inline]
-    pub fn new(r: u8, g: u8, b: u8) -> Self {
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
 
     #[inline]
-    pub fn from_u32(color: u32) -> Self {
+    pub const fn from_u32(color: u32) -> Self {
         Self {
             r: ((color >> 16) & 0xFF) as u8,
             g: ((color >>  0) & 0xFF) as u8,
@@ -135,17 +135,12 @@ impl Rgb {
     }
 
     #[inline]
-    pub fn to_u32(&self) -> u32 {
+    pub const fn to_u32(&self) -> u32 {
         ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
     }
 
     #[inline]
-    pub fn to_color(&self) -> Color {
-        Color::Rgb { r: self.r, g: self.g, b: self. b }
-    }
-
-    #[inline]
-    pub fn into_color(self) -> Color {
+    pub const fn to_color(&self) -> Color {
         Color::Rgb { r: self.r, g: self.g, b: self. b }
     }
 }
@@ -173,7 +168,7 @@ pub enum Color {
 
 impl Color {
     #[inline]
-    pub fn from_u32(color: u32) -> Self {
+    pub const fn from_u32(color: u32) -> Self {
         Self::Rgb {
             r: ((color >> 16) & 0xFF) as u8,
             g: ((color >>  0) & 0xFF) as u8,

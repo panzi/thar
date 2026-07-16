@@ -506,62 +506,97 @@ impl RichText {
 
     pub fn draw(&self, termio: &mut TermIO, row: i32, column: i32) -> std::io::Result<()> {
         self.draw_cropped(
-            termio, row, column,
+            termio, row, column, 0, 0,
             self.width.min(u32::MAX as usize) as u32,
             self.height().min(u32::MAX as usize) as u32,
         )
     }
 
-    pub fn draw_cropped(&self, termio: &mut TermIO, row: i32, column: i32, width: u32, height: u32) -> std::io::Result<()> {
-        let min_height = self.height().min(height as usize);
-        let min_width = self.width().min(width as usize);
+    pub fn draw_cropped(&self, termio: &mut TermIO, row: i32, column: i32, crop_row: u32, crop_column: u32, crop_width: u32, crop_height: u32) -> std::io::Result<()> {
+        let mut crop_row = crop_row as usize;
+        let mut crop_column = crop_column as usize;
 
-        // x/y in this function is 0-based, but row/column in terminals are 1-based
-        let x = column - 1;
-        let y = row - 1;
-
-        if y < 0 && -y as usize >= min_height {
-            return Ok(());
-        }
-
-        if x < 0 && -x as usize >= min_width {
-            return Ok(());
-        }
+        let mut crop_row_end = crop_row + crop_height as usize;
+        let mut crop_column_end = crop_column + crop_width as usize;
 
         let window_size = *termio.window_size();
-        if y >= 0 && y as u32 >= window_size.rows {
+
+        if crop_row >= self.height() {
             return Ok(());
         }
 
-        if x >= 0 && x as u32 >= window_size.columns {
+        if crop_column >= self.width() {
             return Ok(());
         }
 
-        let start_line_index = if y < 0 { -y as usize } else { 0 };
-        let end_line_index = (start_line_index + height as usize)
-            .min(self.height())
-            .min(window_size.rows as usize - if y >= 0 { y as usize } else { 0 });
+        if row < 0 {
+            if crop_row_end < -row as usize {
+                return Ok(());
+            }
+        } else {
+            if row as u32 > window_size.rows {
+                return Ok(());
+            }
+        }
 
-        // {
-        //     let mut f = std::fs::OpenOptions::new().append(true).create(true).open("tmp/error.log")?;
-        //     writeln!(f, ">>> [x{}][{}..{}] row: {row}, height: {height}", rich_text.height(), start_line_index, end_line_index)?;
-        // }
+        if column < 0 {
+            if crop_column_end < -column as usize {
+                return Ok(());
+            }
+        } else {
+            if column as u32 > window_size.columns {
+                return Ok(());
+            }
+        }
 
-        let lines = &self.lines[start_line_index..end_line_index];
+        if crop_row_end > self.height() {
+            crop_row_end = self.height();
+        }
+
+        if crop_column_end > self.width() {
+            crop_column_end = self.width();
+        }
+
+        if row < 0 {
+            let max_rows = -row as usize + window_size.rows as usize;
+            if crop_row_end > max_rows {
+                crop_row_end = max_rows;
+            }
+
+            if crop_row < -row as usize {
+                crop_row = -row as usize;
+            }
+        } else {
+            if row as usize + crop_row_end > window_size.rows as usize {
+                crop_row_end = window_size.rows as usize - row as usize; // XXX: overflow
+            }
+        }
+
+        if column < 0 {
+            let max_columns = -column as usize + window_size.columns as usize;
+            if crop_column_end > max_columns {
+                crop_column_end = max_columns;
+            }
+
+            if crop_column < -column as usize {
+                crop_column = -column as usize;
+            }
+        } else {
+            if column as usize + crop_column_end > window_size.columns as usize {
+                crop_column_end = window_size.columns as usize - column as usize;
+            }
+        }
+
+        let term_row = (crop_row as i32 + row) as u32;
+        let term_column = (crop_column as i32 + column) as u32;
+
+        let lines = &self.lines[crop_row..crop_row_end];
 
         termio.clear_style()?;
 
         termio.fg_default()?;
         termio.bg_default()?;
 
-        let start_row = if y < 0 { 1 } else { y as u32 + 1 };
-        let start_column = if x < 0 { 1 } else { x as u32 + 1 };
-        let start_width = if x < 0 { -x as usize } else { 0 };
-        let end_width = if x < 0 {
-            (width as usize).min(window_size.columns as usize + -x as usize)
-        } else {
-            (width as usize).min(window_size.columns as usize - x as usize)
-        };
         let mut first = true;
         let mut prev_line_index = 0;
 
@@ -578,39 +613,39 @@ impl RichText {
                     RichTextCode::Background(color) => termio.bg(*color)?,
                     RichTextCode::Text { text, width: text_width } => {
                         let text_width = *text_width;
-                        if line_width >= start_width && line_width + text_width <= end_width {
+                        if line_width >= crop_column && line_width + text_width <= crop_column_end {
                             if !moved {
-                                if !first && start_column == 1 && prev_line_index + 1 == line_index {
+                                if !first && term_column == 0 && prev_line_index + 1 == line_index {
                                     termio.write_str("\n")?;
                                 } else {
                                     first = false;
-                                    termio.move_cursor(start_row + line_index as u32, start_column)?;
+                                    termio.move_cursor(term_row + line_index as u32, term_column)?;
                                 }
                                 moved = true;
                                 prev_line_index = line_index;
                             }
 
                             termio.write_str(text)?;
-                        } else if line_width + text_width >= start_width && line_width < end_width {
+                        } else if line_width + text_width >= crop_column && line_width < crop_column_end {
                             if !moved {
-                                if !first && start_column == 1 && prev_line_index + 1 == line_index {
+                                if !first && term_column == 0 && prev_line_index + 1 == line_index {
                                     termio.write_str("\n")?;
                                 } else {
                                     first = false;
-                                    termio.move_cursor(start_row + line_index as u32, start_column)?;
+                                    termio.move_cursor(term_row + line_index as u32, term_column)?;
                                 }
                                 moved = true;
                                 prev_line_index = line_index;
                             }
 
-                            let text_start_width = if line_width >= start_width { 0 } else { start_width - line_width };
-                            if end_width > text_start_width && text_start_width < text_width {
+                            let text_column = if line_width >= crop_column { 0 } else { crop_column - line_width };
+                            let text_column_end = crop_column_end - line_width;
+                            if crop_column_end >= text_column && text_column < text_width {
                                 let text = crop(
                                     text,
-                                    text_start_width,
-                                    end_width + 1,
+                                    text_column,
+                                    text_column_end,
                                 );
-                                //termio.write_str(&format!("{text_start_width} "))?;
                                 termio.write_str(text)?;
                             }
                         }

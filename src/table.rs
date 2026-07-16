@@ -163,6 +163,7 @@ impl Table {
                 scoped_state.termio_mut(),
                 row + scroll_row as i32,
                 column + scroll_column as i32,
+                0, 0,
                 width,
                 height,
             );
@@ -209,6 +210,7 @@ impl Table {
                 scoped_state.termio_mut(),
                 row + scroll_row as i32 + acc_height as i32,
                 column + scroll_column as i32,
+                0, 0,
                 width,
                 height - acc_height as u32,
             );
