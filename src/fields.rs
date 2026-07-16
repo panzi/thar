@@ -259,6 +259,24 @@ pub enum ResponseField {
     Comment,
 }
 
+fn get_staus_color(status: u32) -> Color {
+    if status < 100 {
+        Color::Color16(Color16::Magenta)
+    } else if status < 200 {
+        Color::Color16(Color16::Cyan)
+    } else if status < 300 {
+        Color::Color16(Color16::Green)
+    } else if status < 400 {
+        Color::Color16(Color16::Blue)
+    } else if status < 500 {
+        Color::Color16(Color16::Yellow)
+    } else if status < 600 {
+        Color::Color16(Color16::Red)
+    } else {
+        Color::Color16(Color16::Magenta)
+    }
+}
+
 impl Field for ResponseField {
     #[inline]
     fn header(&self) -> &str {
@@ -293,11 +311,13 @@ impl Field for ResponseField {
 
         match self {
             Self::Status => {
+                let style = RichTextStyle::build().foreground(get_staus_color(response.status)).into();
                 write!(buf, "{}", response.status)?;
-                rich_text.append_plain_text(buf);
+                rich_text.append_text(&style, buf);
             },
             Self::StatusText => {
-                rich_text.append_plain_text(&response.status_text);
+                let style = RichTextStyle::build().foreground(get_staus_color(response.status)).into();
+                rich_text.append_text(&style, &response.status_text);
             },
             Self::RedirectUrl => {
                 if let Some(redirect_url) = &response.redirect_url {
