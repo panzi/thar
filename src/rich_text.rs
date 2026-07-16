@@ -425,44 +425,50 @@ impl RichText {
     }
 
     pub fn right_pad(&mut self, width: usize) {
-        for line in &mut self.lines {
-            let line_width = line_width(line);
+        if width > self.width {
+            for line in &mut self.lines {
+                let line_width = line_width(line);
 
-            if line_width < width {
-                let diff = width - line_width;
-                if let Some(RichTextCode::Text { text, width: text_width }) = line.last_mut() {
-                    text.reserve(diff);
-                    for _ in 0..diff {
-                        text.push(' ');
+                if line_width < width {
+                    let diff = width - line_width;
+                    if let Some(RichTextCode::Text { text, width: text_width }) = line.last_mut() {
+                        text.reserve(diff);
+                        for _ in 0..diff {
+                            text.push(' ');
+                        }
+                        *text_width += diff;
+                    } else {
+                        let text = " ".repeat(diff);
+                        line.push(RichTextCode::Text { text, width: diff });
                     }
-                    *text_width += diff;
-                } else {
-                    let text = " ".repeat(diff);
-                    line.push(RichTextCode::Text { text, width: diff });
                 }
             }
+            self.width = width;
         }
     }
 
     pub fn left_pad(&mut self, width: usize) {
-        for line in &mut self.lines {
-            let line_width = line_width(line);
+        if width > self.width {
+            for line in &mut self.lines {
+                let line_width = line_width(line);
 
-            if line_width < width {
-                let diff = width - line_width;
-                if let Some(RichTextCode::Text { text, width: text_width }) = line.first_mut() {
-                    let mut new_text = String::with_capacity(text.len() + diff);
-                    for _ in 0..diff {
-                        new_text.push(' ');
+                if line_width < width {
+                    let diff = width - line_width;
+                    if let Some(RichTextCode::Text { text, width: text_width }) = line.first_mut() {
+                        let mut new_text = String::with_capacity(text.len() + diff);
+                        for _ in 0..diff {
+                            new_text.push(' ');
+                        }
+                        new_text.push_str(&text);
+                        std::mem::swap(&mut new_text, text);
+                        *text_width += diff;
+                    } else {
+                        let text = " ".repeat(diff);
+                        line.insert(0, RichTextCode::Text { text, width: diff });
                     }
-                    new_text.push_str(&text);
-                    std::mem::swap(&mut new_text, text);
-                    *text_width += diff;
-                } else {
-                    let text = " ".repeat(diff);
-                    line.insert(0, RichTextCode::Text { text, width: diff });
                 }
             }
+            self.width = width;
         }
     }
 
@@ -523,8 +529,8 @@ impl RichText {
             crop_row_end = self.height();
         }
 
-        if crop_column_end > self.width() {
-            crop_column_end = self.width();
+        if crop_column_end > self.width {
+            crop_column_end = self.width;
         }
 
         if crop_row >= crop_row_end {
@@ -558,7 +564,7 @@ impl RichText {
             }
 
             if row as usize + crop_row_end > window_size.rows as usize {
-                crop_row_end = window_size.rows as usize - row as usize;
+                crop_row_end = window_size.rows as usize + crop_row - row as usize;
             }
             term_row = row as u32;
         }
@@ -580,8 +586,8 @@ impl RichText {
                 return Ok(());
             }
 
-            if column as usize + crop_column_end > window_size.columns as usize {
-                crop_column_end = window_size.columns as usize - column as usize;
+            if column as usize + (crop_column_end - crop_column) > window_size.columns as usize {
+                crop_column_end = window_size.columns as usize + crop_column - column as usize;
             }
             term_column = column as u32;
         }
@@ -636,7 +642,7 @@ impl RichText {
 
                             let text_column = if line_width >= crop_column { 0 } else { crop_column - line_width };
                             let text_column_end = crop_column_end - line_width;
-                            if crop_column_end >= text_column && text_column < text_width {
+                            if text_column < text_column_end {
                                 let text = crop(
                                     text,
                                     text_column,
