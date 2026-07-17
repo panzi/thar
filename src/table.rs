@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, event::{Event, Key}, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO};
+use crate::{color::{Color, Color16}, event::{Event, Key}, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{Rect, Widget}};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Table {
@@ -10,9 +10,10 @@ pub struct Table {
     width: usize,
     header_height: usize,
     rows_height: usize,
-    scroll_row: i32,
-    scroll_column: i32,
+    scroll_row: u32,
+    scroll_column: u32,
     selected_row_index: usize,
+    draw_rect: Rect,
 }
 
 fn gather_widths(columns: &mut Vec<Column>, row: &[RichText]) {
@@ -89,6 +90,7 @@ impl Table {
             scroll_row: 0,
             scroll_column: 0,
             selected_row_index: 0,
+            draw_rect: Rect::default(),
         };
 
         table.update();
@@ -117,12 +119,12 @@ impl Table {
     }
 
     #[inline]
-    pub fn scroll_row(&self) -> i32 {
+    pub fn scroll_row(&self) -> u32 {
         self.scroll_row
     }
 
     #[inline]
-    pub fn scroll_column(&self) -> i32 {
+    pub fn scroll_column(&self) -> u32 {
         self.scroll_column
     }
 
@@ -132,44 +134,18 @@ impl Table {
     }
 
     #[inline]
-    pub fn set_scroll_row(&mut self, scroll_row: i32) {
+    pub fn set_scroll_row(&mut self, scroll_row: u32) {
         self.scroll_row = scroll_row;
     }
 
     #[inline]
-    pub fn set_scroll_column(&mut self, scroll_column: i32) {
+    pub fn set_scroll_column(&mut self, scroll_column: u32) {
         self.scroll_column = scroll_column;
     }
 
     #[inline]
     pub fn set_selected_row_index(&mut self, selected_row_index: usize) {
         self.selected_row_index = selected_row_index;
-    }
-
-    pub fn handle_event(&mut self, event: Event) {
-        match event {
-            Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
-                if self.scroll_row > i32::MIN {
-                    self.scroll_row -= 1;
-                }
-            }
-            Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
-                if self.scroll_row < i32::MAX {
-                    self.scroll_row += 1;
-                }
-            }
-            Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
-                if self.scroll_column > i32::MIN {
-                    self.scroll_column -= 1;
-                }
-            }
-            Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
-                if self.scroll_column < i32::MAX {
-                    self.scroll_column += 1;
-                }
-            }
-            _ => {}
-        }
     }
 
     pub fn set_columns(&mut self, column_defs: impl IntoIterator<Item = ColumnDef>) {
@@ -233,18 +209,45 @@ impl Table {
         &mut self.columns
     }
 
-    pub fn redraw(&self, termio: &mut TermIO, row: i32, column: i32, width: u32, height: u32) -> std::io::Result<()> {
-        let scroll_row = self.scroll_row;
-        let scroll_column = self.scroll_column;
-        let selected_row_index = self.selected_row_index;
+    pub fn clamp_scroll(&mut self) {
+        let height = self.height();
+        if self.draw_rect.height as usize > height {
+            self.scroll_row = 0;
+        } else {
+            let max_overflow = (height - self.draw_rect.height as usize) as u32;
 
-        let end_height = height as i32 + (-scroll_row).max(0);
-
-        if end_height < 0 {
-            return Ok(());
+            if self.scroll_row > max_overflow {
+                self.scroll_row = max_overflow;
+            }
         }
 
-        let end_height = end_height as usize;
+        if self.draw_rect.width as usize > self.width {
+            self.scroll_column = 0;
+        } else {
+            let max_overflow = (self.width - self.draw_rect.width as usize) as u32;
+
+            if self.scroll_column > max_overflow {
+                self.scroll_column = max_overflow;
+            }
+        }
+    }
+}
+
+impl Widget for Table {
+    #[inline]
+    fn draw_rect(&self) -> Rect {
+        self.draw_rect
+    }
+
+    #[inline]
+    fn set_draw_rect(&mut self, rect: &Rect) {
+        self.draw_rect = *rect;
+        self.clamp_scroll();
+    }
+
+    fn draw(&self, termio: &mut TermIO) -> std::io::Result<()> {
+        let Rect { row, column, width, height } = self.draw_rect;
+        let &Table { scroll_row, scroll_column, selected_row_index, .. } = self;
 
         let even_bg = Color::from_u32(0x555555);
         let odd_bg = Color::Color16(Color16::Black);
@@ -253,19 +256,16 @@ impl Table {
         let mut scoped_state = ScopedTermIOState::default_bg(termio, odd_bg);
         let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), fg);
 
-        let draw_column = if scroll_column < 0 { column - scroll_column } else { column };
-        let crop_width = if scroll_column < 0 { width + -scroll_column as u32 } else { width };
-
         {
             scoped_state.termio_mut().font_weight(FontWeight::Bold)?;
 
             let res = self.formatted_header.draw_cropped(
                 scoped_state.termio_mut(),
                 row,
-                draw_column,
+                column,
                 0,
-                scroll_column.max(0) as u32,
-                crop_width,
+                scroll_column,
+                width,
                 height,
             );
 
@@ -275,13 +275,17 @@ impl Table {
         }
 
         let header_height = self.formatted_header.height();
-        let mut body_height = 0;
 
+        if (height as usize) < header_height {
+            return Ok(());
+        }
+
+        let mut body_height = 0;
         let mut current_row_index = 0;
 
         while current_row_index < self.formatted_rows.len() {
             let row_height = self.formatted_rows[current_row_index].height();
-            if body_height as i32 + row_height as i32 + scroll_row >= header_height as i32 {
+            if body_height as i32 + row_height as i32 - scroll_row as i32 >= header_height as i32 {
                 break;
             }
 
@@ -289,18 +293,14 @@ impl Table {
             current_row_index += 1;
         }
 
-        let crop_column = scroll_column.max(0) as u32;
+        let mut avail_height = height - header_height as u32;
 
         while current_row_index < self.formatted_rows.len() {
-            if body_height >= end_height {
-                break;
-            }
-
             let table_row = &self.formatted_rows[current_row_index];
 
             let mut scoped_state = ScopedTermIOState::default_bg(
                 scoped_state.termio_mut(),
-                if (current_row_index & 1) == 0 { even_bg } else { odd_bg }
+                if ((current_row_index + scroll_row as usize) & 1) == 0 { even_bg } else { odd_bg }
             );
 
             let mut scoped_state = if current_row_index == selected_row_index {
@@ -311,19 +311,56 @@ impl Table {
 
             table_row.draw_cropped(
                 scoped_state.termio_mut(),
-                row + header_height as i32 + (body_height as i32 + scroll_row).max(0),
-                draw_column,
+                row + header_height as i32 + (body_height as i32 - scroll_row as i32).max(0),
+                column,
                 0,
-                crop_column,
-                crop_width,
-                height - body_height as u32,
+                scroll_column,
+                width,
+                avail_height,
             )?;
 
-            body_height += table_row.height();
             current_row_index += 1;
+
+            let row_height = table_row.height();
+            body_height += row_height;
+            avail_height = if (avail_height as usize) > row_height {
+                avail_height - row_height as u32
+            } else {
+                break;
+            };
         }
 
         Ok(())
+    }
+
+    fn handle_event(&mut self, event: &Event) {
+        match event {
+            Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
+                if self.scroll_row > 0 {
+                    self.scroll_row -= 1;
+                    self.clamp_scroll();
+                }
+            }
+            Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
+                if self.scroll_row < u32::MAX {
+                    self.scroll_row += 1;
+                    self.clamp_scroll();
+                }
+            }
+            Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
+                if self.scroll_column > 0 {
+                    self.scroll_column -= 1;
+                    self.clamp_scroll();
+                }
+            }
+            Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
+                if self.scroll_column < u32::MAX {
+                    self.scroll_column += 1;
+                    self.clamp_scroll();
+                }
+            }
+            _ => {}
+        }
     }
 }
 

@@ -39,6 +39,13 @@ pub struct WindowSize {
     pub columns: u32,
 }
 
+impl std::fmt::Display for WindowSize {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{}", self.columns, self.rows)
+    }
+}
+
 pub const FG_DEFAULT: &[u8] = b"\x1B[39m";
 pub const BG_DEFAULT: &[u8] = b"\x1B[49m";
 

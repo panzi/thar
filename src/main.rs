@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, RequestField, ResponseField}, rich_text::{RichText, RichTextStyle}, schema::HAR, termio::TermIO, table::Table};
+use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, RequestField, ResponseField}, rich_text::{RichText, RichTextStyle}, schema::HAR, table::Table, termio::TermIO, widget::{Rect, Widget}};
 
 use clap::Parser;
 
@@ -137,7 +137,7 @@ A last line.";
         return Ok(());
     }
 
-    if 1 == 1 {
+    if 1 == 2 {
         // debug events
         let mut termio = termio::TermIO::from_tty()?;
 
@@ -200,13 +200,30 @@ A last line.";
         view_state.entries_table.rows_mut().push(row);
     }
 
+    {
+        let window_size = termio.window_size();
+        view_state.entries_table.set_draw_rect(&Rect {
+            row: 1,
+            column: 0,
+            width: window_size.columns,
+            height: if window_size.rows > 0 { window_size.rows - 1 } else { 0 },
+        });
+    }
+
     view_state.entries_table.update();
 
     full_redraw(&mut termio, &view_state)?;
 
     while let Some(event) = termio.wait()? {
         match event {
-            Event::WindowSize { .. } => {}
+            Event::WindowSize { columns, rows } => {
+                view_state.entries_table.set_draw_rect(&Rect {
+                    row: 1,
+                    column: 0,
+                    width: columns,
+                    height: if rows > 0 { rows - 1 } else { 0 },
+                });
+            }
             Event::KeyPress { key: Key::Char('r'), alt: true, ctrl: false, shift: false } => {
                 view_state.active_view = ActiveView::EntryList;
             }
@@ -219,7 +236,7 @@ A last line.";
             _ => {
                 match view_state.active_view {
                     ActiveView::EntryList => {
-                        view_state.entries_table.handle_event(event);
+                        view_state.entries_table.handle_event(&event);
                     }
                     _ => {}
                 }
@@ -257,12 +274,7 @@ fn full_redraw(termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<(
         match view_state.active_view {
             ActiveView::EntryList => {
                 //view_state.entries_table.formatted_rows[0].draw(termio, 1, 0)?;
-                view_state.entries_table.redraw(
-                    termio,
-                    1, 0,
-                    window_size.columns,
-                    window_size.rows - 1,
-                )?;
+                view_state.entries_table.draw(termio)?;
             }
             ActiveView::PageList => {
 
