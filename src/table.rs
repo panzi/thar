@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO};
+use crate::{color::{Color, Color16}, event::{Event, Key}, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Table {
@@ -10,6 +10,9 @@ pub struct Table {
     width: usize,
     header_height: usize,
     rows_height: usize,
+    scroll_row: i32,
+    scroll_column: i32,
+    selected_row_index: usize,
 }
 
 fn gather_widths(columns: &mut Vec<Column>, row: &[RichText]) {
@@ -80,12 +83,15 @@ impl Table {
             rows: rows.into(),
             formatted_header: RichText::new(),
             formatted_rows: Vec::new(),
-            width:  0,
+            width: 0,
             header_height: 0,
             rows_height: 0,
+            scroll_row: 0,
+            scroll_column: 0,
+            selected_row_index: 0,
         };
 
-        table.format();
+        table.update();
 
         table
     }
@@ -110,6 +116,62 @@ impl Table {
         self.header_height + self.rows_height
     }
 
+    #[inline]
+    pub fn scroll_row(&self) -> i32 {
+        self.scroll_row
+    }
+
+    #[inline]
+    pub fn scroll_column(&self) -> i32 {
+        self.scroll_column
+    }
+
+    #[inline]
+    pub fn selected_row_index(&self) -> usize {
+        self.selected_row_index
+    }
+
+    #[inline]
+    pub fn set_scroll_row(&mut self, scroll_row: i32) {
+        self.scroll_row = scroll_row;
+    }
+
+    #[inline]
+    pub fn set_scroll_column(&mut self, scroll_column: i32) {
+        self.scroll_column = scroll_column;
+    }
+
+    #[inline]
+    pub fn set_selected_row_index(&mut self, selected_row_index: usize) {
+        self.selected_row_index = selected_row_index;
+    }
+
+    pub fn handle_event(&mut self, event: Event) {
+        match event {
+            Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
+                if self.scroll_row > i32::MIN {
+                    self.scroll_row -= 1;
+                }
+            }
+            Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
+                if self.scroll_row < i32::MAX {
+                    self.scroll_row += 1;
+                }
+            }
+            Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
+                if self.scroll_column > i32::MIN {
+                    self.scroll_column -= 1;
+                }
+            }
+            Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
+                if self.scroll_column < i32::MAX {
+                    self.scroll_column += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn set_columns(&mut self, column_defs: impl IntoIterator<Item = ColumnDef>) {
         self.columns.clear();
         self.header.clear();
@@ -120,7 +182,7 @@ impl Table {
         }
     }
 
-    pub fn format(&mut self) {
+    pub fn update(&mut self) {
         self.formatted_header.clear();
         self.formatted_rows.clear();
 
@@ -171,11 +233,14 @@ impl Table {
         &mut self.columns
     }
 
-    pub fn redraw(&self, termio: &mut TermIO, row: i32, column: i32, width: u32, height: u32, scroll_row: i32, scroll_column: i32, selected_row_index: usize) -> std::io::Result<()> {
-        let end_height = height as i32 + scroll_row;
+    pub fn redraw(&self, termio: &mut TermIO, row: i32, column: i32, width: u32, height: u32) -> std::io::Result<()> {
+        let scroll_row = self.scroll_row;
+        let scroll_column = self.scroll_column;
+        let selected_row_index = self.selected_row_index;
+        let end_height = height as i32 + (-scroll_row).max(0);
 
         if end_height < 0 {
-            //return Ok(());
+            return Ok(());
         }
 
         let end_height = end_height as usize;
@@ -188,7 +253,6 @@ impl Table {
         let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), fg);
 
         let draw_column = if scroll_column < 0 { column - scroll_column } else { column };
-
         let crop_width = if scroll_column < 0 { width + -scroll_column as u32 } else { width };
 
         {
@@ -247,9 +311,9 @@ impl Table {
 
             let acc_body_height = acc_height - header_height;
 
-            if acc_body_height > height as usize {
-                break; // XXX: should not be necessary
-            }
+            //if acc_body_height > height as usize {
+            //    break; // XXX: should not be necessary
+            //}
 
             table_row.draw_cropped(
                 scoped_state.termio_mut(),

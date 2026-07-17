@@ -2,12 +2,97 @@ use std::fmt::Write;
 
 pub const ESCAPE: u8 = 0x1B;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+// move = 35
+// click left = 0
+// click middle = 1
+// click right = 2
+// move+hold left = 32
+// move+hold middle = 33
+// move+hold right = 34
+
+// ctrl+click left = 16
+// ctrl+click middle = 17
+// ctrl+click right = 18
+// ctrl+move+hold left = 48
+// ctrl+move+hold middle = 49
+// ctrl+move+hold right = 50
+// ctrl+move = 51
+
+// alt+click left = ?
+// alt+click middle = ?
+// alt+click right = ?
+// alt+move+hold left = ?
+// alt+move+hold middle = ?
+// alt+move+hold right = ?
+// alt+move = 43
+
+// ctrl+alt+click left = 24
+// ctrl+alt+click middle = 25
+// ctrl+alt+click right = 26
+// ctrl+alt+move+hold left = 56
+// ctrl+alt+move+hold middle = 57
+// ctrl+alt+move+hold right = 58
+// ctrl+alt+move = 59
+
+pub const MOUSE_MASK_BUTTON: u32 = 3;
+pub const MOUSE_MASK_SHIFT: u32 = 4;
+pub const MOUSE_MASK_ALT: u32 = 8;
+pub const MOUSE_MASK_CTRL: u32 = 16;
+pub const MOUSE_MASK_MOVE: u32 = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    None,
+    Left,
+    Middle,
+    Right,
+}
+
+impl MouseButton {
+    #[inline]
+    pub fn from_flags(flags: u32) -> Self {
+        match flags & MOUSE_MASK_BUTTON {
+            0 => Self::Left,
+            1 => Self::Middle,
+            2 => Self::Right,
+            3 => Self::None,
+            _ => panic!("impossible mouse button flags: {flags}"),
+        }
+    }
+
+    #[inline]
+    pub fn to_flags(&self) -> u32 {
+        match self {
+            Self::Left   => 0,
+            Self::Middle => 1,
+            Self::Right  => 2,
+            Self::None   => 3,
+        }
+    }
+}
+
+impl From<u32> for MouseButton {
+    #[inline]
+    fn from(value: u32) -> Self {
+        Self::from_flags(value)
+    }
+}
+
+impl From<MouseButton> for u32 {
+    #[inline]
+    fn from(value: MouseButton) -> Self {
+        value.to_flags()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     CursorPosition { row: u32, column: u32 },
     WindowSize { rows: u32, columns: u32 },
-    KeyPress { ctrl: bool, alt: bool, shift: bool, key: Key },
-    Mouse { ctrl: bool, alt: bool, shift: bool, release: bool, button: u8, row: u32, column: u32 },
+    KeyPress { key: Key, ctrl: bool, alt: bool, shift: bool },
+    MouseDown { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
+    MouseUp   { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
+    MouseMove { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
     Unsupported,
 }
 
@@ -71,7 +156,7 @@ impl std::fmt::Display for Event {
 
 pub const ESCAPE_EVENT: Event = Event::KeyPress { ctrl: false, alt: false, shift: false, key: Key::Escape };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     Char(char),
     Function(u16),
@@ -85,8 +170,8 @@ pub enum Key {
     Right,
     Keypad5,
     Backspace,
-    PrintScreen, // TODO
-    ScrollLock,  // TODO
+    //PrintScreen, // not possible?
+    //ScrollLock,  // not possible?
     Pause,
     Enter,
     PageUp,
@@ -112,13 +197,21 @@ impl std::fmt::Display for Key {
             Self::Char(' ') => f.write_str("Space"),
             Self::Char('\t') => f.write_str("Tab"),
             Self::Char(ch) => {
-                let upper = ch.to_uppercase();
-                if upper.len() == 1 {
-                    for ch in upper {
-                        f.write_char(ch)?;
+                if ch.is_ascii_control() {
+                    if ch == '\x7F' {
+                        f.write_char('\u{2421}')?;
+                    } else {
+                        f.write_char(unsafe { char::from_u32_unchecked(0x2400 + ch as u32) })?;
                     }
                 } else {
-                    f.write_char(ch)?;
+                    let upper = ch.to_uppercase();
+                    if upper.len() == 1 {
+                        for ch in upper {
+                            f.write_char(ch)?;
+                        }
+                    } else {
+                        f.write_char(ch)?;
+                    }
                 }
 
                 Ok(())

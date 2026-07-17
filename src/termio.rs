@@ -1,6 +1,6 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key}, style::{FontStyle, FontWeight, TextDecoration}};
+use crate::{borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key, MOUSE_MASK_ALT, MOUSE_MASK_CTRL, MOUSE_MASK_MOVE, MOUSE_MASK_SHIFT, MouseButton}, style::{FontStyle, FontWeight, TextDecoration}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -115,8 +115,8 @@ impl TermIO {
         // CSI ?   25 l   Hide cursor (DECTCEM), VT220
         // CSI ?    7 l   No Auto-Wrap Mode (DECAWM), VT100.
         // CSI 2 J        Clear entire screen
-        //app.write(b"\x1B[?1049h\x1B[?25l\x1B[?7l\x1B[2J")?;
-        app.write(b"\x1B[?25l\x1B[?7l\x1B[2J")?;
+        app.write(b"\x1B[?1049h\x1B[?25l\x1B[?7l\x1B[2J")?;
+        //app.write(b"\x1B[?25l\x1B[?7l\x1B[2J")?;
         app.flush()?;
         app.refresh_window_size()?;
 
@@ -707,7 +707,8 @@ impl TermIO {
         }
 
         if byte >= 1 && byte <= 26 {
-            return Ok(Some(Event::KeyPress { alt: false, ctrl: true, shift: false, key: Key::Char((b'a' + byte).into()) }));
+            // can't distinquish betweeen Tab and Ctrl+I
+            return Ok(Some(Event::KeyPress { alt: false, ctrl: true, shift: false, key: Key::Char((b'a' - 1 + byte).into()) }));
         }
 
         if byte != ESCAPE {
@@ -859,15 +860,45 @@ impl TermIO {
                 (b'<', b'M', 3) | (b'<', b'm', 3) => {
                     // mouse
                     let _release = byte == b'm';
-                    let _buttons = self.uint_buffer[0];
-                    let _column = self.uint_buffer[1];
-                    let _row = self.uint_buffer[2];
+                    let flags = self.uint_buffer[0];
+                    let column = self.uint_buffer[1];
+                    let row = self.uint_buffer[2];
 
-                    // TODO: mouse support
-                    return Ok(Some(Event::Unsupported));
+                    if column == 0 || row == 0 {
+                        return Ok(Some(Event::Unsupported));
+                    }
+
+                    let column = column - 1;
+                    let row = row - 1;
+
+                    let button = MouseButton::from_flags(flags);
+                    let shift = (flags & MOUSE_MASK_SHIFT) != 0;
+                    let alt = (flags & MOUSE_MASK_ALT) != 0;
+                    let ctrl = (flags & MOUSE_MASK_CTRL) != 0;
+
+                    if (flags & MOUSE_MASK_MOVE) != 0 {
+                        // mouse move
+                        return Ok(Some(Event::MouseMove { row, column, shift, ctrl, alt, button }));
+                    } else if byte == b'M' {
+                        // mouse down
+                        return Ok(Some(Event::MouseDown { row, column, shift, ctrl, alt, button }));
+                    } else {
+                        // mouse up
+                        return Ok(Some(Event::MouseUp { row, column, shift, ctrl, alt, button }));
+                    }
                 }
                 (0, b'R', 2) | (b'?', b'R', 2) => {
-                    return Ok(Some(Event::CursorPosition { row: self.uint_buffer[0], column: self.uint_buffer[1] }));
+                    let row = self.uint_buffer[0];
+                    let column = self.uint_buffer[1];
+
+                    if column == 0 || row == 0 {
+                        return Ok(Some(Event::Unsupported));
+                    }
+
+                    let column = column - 1;
+                    let row = row - 1;
+
+                    return Ok(Some(Event::CursorPosition { row, column }));
                 }
                 _ => {
                     return Ok(Some(Event::Unsupported));

@@ -39,11 +39,7 @@ impl Default for ActiveView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ViewState {
-    scroll_column: i32,
-    scroll_row: i32,
     active_view: ActiveView,
-    entry_index: u32,
-    page_index: u32,
     requests_label: RichText,
     pages_label: RichText,
     entries_table: Table,
@@ -140,6 +136,26 @@ A last line.";
         return Ok(());
     }
 
+    if 1 == 1 {
+        // debug events
+        let mut termio = termio::TermIO::from_tty()?;
+
+        termio.enable_mouse()?;
+        termio.flush()?;
+
+        while let Some(event) = termio.wait()? {
+            println!("{event:?}");
+            match event {
+                Event::KeyPress { key: Key::Char('q'), alt: false, ctrl: false, shift: false } => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        return Ok(());
+    }
+
     let args = Args::parse();
 
     let har: HAR = if let Some(path) = args.path {
@@ -183,7 +199,7 @@ A last line.";
         view_state.entries_table.rows_mut().push(row);
     }
 
-    view_state.entries_table.format();
+    view_state.entries_table.update();
 
     full_redraw(&mut termio, &view_state)?;
 
@@ -199,27 +215,14 @@ A last line.";
             Event::KeyPress { key: Key::Char('q'), alt: false, ctrl: false, shift: false } => {
                 break;
             }
-            Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
-                if view_state.scroll_row > i32::MIN {
-                    view_state.scroll_row -= 1;
+            _ => {
+                match view_state.active_view {
+                    ActiveView::EntryList => {
+                        view_state.entries_table.handle_event(event);
+                    }
+                    _ => {}
                 }
             }
-            Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
-                if view_state.scroll_row < i32::MAX {
-                    view_state.scroll_row += 1;
-                }
-            }
-            Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
-                if view_state.scroll_column > i32::MIN {
-                    view_state.scroll_column -= 1;
-                }
-            }
-            Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
-                if view_state.scroll_column < i32::MAX {
-                    view_state.scroll_column += 1;
-                }
-            }
-            _ => {}
         }
 
         full_redraw(&mut termio, &view_state)?;
@@ -258,9 +261,6 @@ fn full_redraw(termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<(
                     1, 0,
                     window_size.columns,
                     window_size.rows - 1,
-                    view_state.scroll_row,
-                    view_state.scroll_column,
-                    view_state.entry_index as usize,
                 )?;
             }
             ActiveView::PageList => {
