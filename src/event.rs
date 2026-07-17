@@ -71,6 +71,18 @@ impl MouseButton {
     }
 }
 
+impl std::fmt::Display for MouseButton {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Left   => "Left Mouse Button".fmt(f),
+            Self::Middle => "Middle Mouse Button".fmt(f),
+            Self::Right  => "Right Mouse Button".fmt(f),
+            Self::None   => "None".fmt(f),
+        }
+    }
+}
+
 impl From<u32> for MouseButton {
     #[inline]
     fn from(value: u32) -> Self {
@@ -118,38 +130,71 @@ impl Event {
     }
 }
 
+fn fmt_modifiers(shift: bool, alt: bool, ctrl: bool, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    if shift {
+        f.write_str("Shift")?;
+    }
+
+    if ctrl {
+        if shift {
+            f.write_str("+Ctrl")?;
+        } else {
+            f.write_str("Ctrl")?;
+        }
+    }
+
+    if alt {
+        if shift || ctrl {
+            f.write_str("+Alt")?;
+        } else {
+            f.write_str("Alt")?;
+        }
+    }
+
+    if shift || ctrl || alt {
+        f.write_str("+")?;
+    }
+
+    Ok(())
+}
+
+fn fmt_mouse(row: u32, column: u32, shift: bool, alt: bool, ctrl: bool, button: MouseButton, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fmt_modifiers(shift, alt, ctrl, f)?;
+
+    write!(f, "{column}x{row}")?;
+
+    if button != MouseButton::None {
+        f.write_str("+")?;
+        std::fmt::Display::fmt(&button, f)?;
+    }
+
+    Ok(())
+}
+
 impl std::fmt::Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Self::KeyPress { ctrl, alt, shift, key } = *self {
-            f.write_str("KeyPress ")?;
+        match *self {
+            Self::KeyPress { ctrl, alt, shift, key } => {
+                f.write_str("KeyPress ")?;
+                fmt_modifiers(shift, alt, ctrl, f)?;
 
-            if shift {
-                f.write_str("Shift")?;
+                std::fmt::Display::fmt(&key, f)
             }
-
-            if ctrl {
-                if shift {
-                    f.write_str("+Ctrl")?;
-                } else {
-                    f.write_str("Ctrl")?;
-                }
+            Self::MouseMove { row, column, shift, ctrl, alt, button } => {
+                f.write_str("MouseMove ")?;
+                fmt_mouse(row, column, shift, alt, ctrl, button, f)
             }
-
-            if alt {
-                if shift || ctrl {
-                    f.write_str("+Alt")?;
-                } else {
-                    f.write_str("Alt")?;
-                }
+            Self::MouseDown { row, column, shift, ctrl, alt, button } => {
+                f.write_str("MouseDown ")?;
+                fmt_mouse(row, column, shift, alt, ctrl, button, f)
             }
-
-            if shift || ctrl || alt {
-                f.write_str("+")?;
+            Self::MouseUp { row, column, shift, ctrl, alt, button } => {
+                f.write_str("MouseUp ")?;
+                fmt_mouse(row, column, shift, alt, ctrl, button, f)
             }
-
-            std::fmt::Display::fmt(&key, f)
-        } else {
-            std::fmt::Debug::fmt(&self, f)
+            _ => {
+                std::fmt::Debug::fmt(&self, f)
+            }
         }
     }
 }
