@@ -1,6 +1,6 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key, MOUSE_MASK_ALT, MOUSE_MASK_CTRL, MOUSE_MASK_MOVE, MOUSE_MASK_SHIFT, MouseButton}, style::{FontStyle, FontWeight, TextDecoration}};
+use crate::{borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key, MOUSE_MASK_ALT, MOUSE_MASK_CTRL, MOUSE_MASK_MOVE, MOUSE_MASK_SHIFT, MOUSE_MASK_UNKNOWN, MOUSE_MASK_WHEEL, MouseButton}, style::{FontStyle, FontWeight, TextDecoration}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -859,22 +859,31 @@ impl TermIO {
                 }
                 (b'<', b'M', 3) | (b'<', b'm', 3) => {
                     // mouse
-                    let _release = byte == b'm';
                     let flags = self.uint_buffer[0];
                     let column = self.uint_buffer[1];
                     let row = self.uint_buffer[2];
 
-                    if column == 0 || row == 0 {
+                    if column == 0 || row == 0 || (flags & MOUSE_MASK_UNKNOWN) != 0 {
                         return Ok(Some(Event::Unsupported));
                     }
 
                     let column = column - 1;
                     let row = row - 1;
 
-                    let button = MouseButton::from_flags(flags);
                     let shift = (flags & MOUSE_MASK_SHIFT) != 0;
                     let alt = (flags & MOUSE_MASK_ALT) != 0;
                     let ctrl = (flags & MOUSE_MASK_CTRL) != 0;
+
+                    if (flags & MOUSE_MASK_WHEEL) != 0 {
+                        // wheel
+                        if (flags & 1) == 0 {
+                            return Ok(Some(Event::WheelUp { row, column, shift, ctrl, alt }));
+                        } else {
+                            return Ok(Some(Event::WheelDown { row, column, shift, ctrl, alt }));
+                        }
+                    }
+
+                    let button = MouseButton::from_flags(flags);
 
                     if (flags & MOUSE_MASK_MOVE) != 0 {
                         // mouse move

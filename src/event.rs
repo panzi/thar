@@ -34,11 +34,22 @@ pub const ESCAPE: u8 = 0x1B;
 // ctrl+alt+move+hold right = 58
 // ctrl+alt+move = 59
 
+// wheel up = 64
+// wheel down = 65
+// alt+wheel up = 72
+// alt+wheel down = 73
+// ctrl+wheel up = 80
+// ctrl+wheel down = 81
+// ctrl+alt+wheel up = 88
+// ctrl+alt+wheel down = 89
+
 pub const MOUSE_MASK_BUTTON: u32 = 3;
 pub const MOUSE_MASK_SHIFT: u32 = 4;
 pub const MOUSE_MASK_ALT: u32 = 8;
 pub const MOUSE_MASK_CTRL: u32 = 16;
 pub const MOUSE_MASK_MOVE: u32 = 32;
+pub const MOUSE_MASK_WHEEL: u32 = 64;
+pub const MOUSE_MASK_UNKNOWN: u32 = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseButton {
@@ -105,6 +116,8 @@ pub enum Event {
     MouseDown { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
     MouseUp   { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
     MouseMove { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
+    WheelUp   { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool },
+    WheelDown { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool },
     Unsupported,
 }
 
@@ -158,39 +171,71 @@ fn fmt_modifiers(shift: bool, alt: bool, ctrl: bool, f: &mut std::fmt::Formatter
     Ok(())
 }
 
-fn fmt_mouse(row: u32, column: u32, shift: bool, alt: bool, ctrl: bool, button: MouseButton, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MouseState {
+    Up,
+    Down,
+    Move,
+}
+
+impl std::fmt::Display for MouseState {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Up => "Up".fmt(f),
+            Self::Down => "Down".fmt(f),
+            Self::Move => "Move".fmt(f),
+        }
+    }
+}
+
+fn fmt_mouse(state: MouseState, row: u32, column: u32, shift: bool, alt: bool, ctrl: bool, button: MouseButton, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     fmt_modifiers(shift, alt, ctrl, f)?;
 
-    write!(f, "{column}x{row}")?;
-
-    if button != MouseButton::None {
-        f.write_str("+")?;
-        std::fmt::Display::fmt(&button, f)?;
+    if button == MouseButton::None {
+        write!(f, "Mouse {state}")?;
+    } else {
+        write!(f, "{button} {state}")?;
     }
 
-    Ok(())
+    write!(f, " {column}x{row}")
+}
+
+fn fmt_wheel(state: MouseState, row: u32, column: u32, shift: bool, alt: bool, ctrl: bool, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fmt_modifiers(shift, alt, ctrl, f)?;
+
+    write!(f, "Wheel {state} {column}x{row}")
 }
 
 impl std::fmt::Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::KeyPress { ctrl, alt, shift, key } => {
-                f.write_str("KeyPress ")?;
+                f.write_str("Key Press ")?;
                 fmt_modifiers(shift, alt, ctrl, f)?;
 
                 std::fmt::Display::fmt(&key, f)
             }
             Self::MouseMove { row, column, shift, ctrl, alt, button } => {
-                f.write_str("MouseMove ")?;
-                fmt_mouse(row, column, shift, alt, ctrl, button, f)
+                fmt_mouse(MouseState::Move, row, column, shift, alt, ctrl, button, f)
             }
             Self::MouseDown { row, column, shift, ctrl, alt, button } => {
-                f.write_str("MouseDown ")?;
-                fmt_mouse(row, column, shift, alt, ctrl, button, f)
+                fmt_mouse(MouseState::Down, row, column, shift, alt, ctrl, button, f)
             }
             Self::MouseUp { row, column, shift, ctrl, alt, button } => {
-                f.write_str("MouseUp ")?;
-                fmt_mouse(row, column, shift, alt, ctrl, button, f)
+                fmt_mouse(MouseState::Up, row, column, shift, alt, ctrl, button, f)
+            }
+            Self::WheelDown { row, column, shift, ctrl, alt } => {
+                fmt_wheel(MouseState::Down, row, column, shift, alt, ctrl, f)
+            }
+            Self::WheelUp { row, column, shift, ctrl, alt } => {
+                fmt_wheel(MouseState::Up, row, column, shift, alt, ctrl, f)
+            }
+            Self::WindowSize { rows, columns } => {
+                write!(f, "Window Size {columns}x{rows}")
+            }
+            Self::CursorPosition { row, column } => {
+                write!(f, "Cursor Position {column}x{row}")
             }
             _ => {
                 std::fmt::Debug::fmt(&self, f)

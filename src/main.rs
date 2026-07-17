@@ -15,6 +15,7 @@ pub mod style;
 pub mod rich_text;
 pub mod fields;
 pub mod table;
+pub mod widget;
 
 #[derive(Parser)]
 struct Args {
@@ -136,7 +137,7 @@ A last line.";
         return Ok(());
     }
 
-    if 1 == 2 {
+    if 1 == 1 {
         // debug events
         let mut termio = termio::TermIO::from_tty()?;
 
