@@ -67,7 +67,7 @@ fn main() -> Result<(), std::io::Error> {
         return Ok(());
     }
 
-    if 1 == 1 {
+    if 1 == 2 {
         let rich_text = "\
 [b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]\n[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg]
 This is a long line demonstrating how things are truncated.
@@ -226,7 +226,9 @@ A last line.";
     }
 
     //drop(termio);
-    //println!("{:#?}", view_state.entries_table);
+    //println!("{}", view_state.entries_table.rows()[0].iter().map(|row| row.width()).sum::<usize>() + view_state.entries_table.rows()[0].len() - 1);
+    //println!("{:#?}", view_state.entries_table.formatted_rows[0]);
+    //println!("{:#?}", view_state.entries_table.rows()[0]);
 
     Ok(())
 }
@@ -250,10 +252,12 @@ fn full_redraw(termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<(
     if window_size.rows > 0 {
         match view_state.active_view {
             ActiveView::EntryList => {
+                //view_state.entries_table.formatted_rows[0].draw(termio, 1, 0)?;
                 view_state.entries_table.redraw(
                     termio,
                     1, 0,
-                    window_size.columns, window_size.rows - 1,
+                    window_size.columns,
+                    window_size.rows - 1,
                     view_state.scroll_row,
                     view_state.scroll_column,
                     view_state.entry_index as usize,

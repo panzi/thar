@@ -7,6 +7,9 @@ pub struct Table {
     rows: Vec<Vec<RichText>>,
     formatted_header: RichText,
     formatted_rows: Vec<RichText>,
+    width: usize,
+    header_height: usize,
+    rows_height: usize,
 }
 
 fn gather_widths(columns: &mut Vec<Column>, row: &[RichText]) {
@@ -30,7 +33,7 @@ fn gather_widths(columns: &mut Vec<Column>, row: &[RichText]) {
     }
 }
 
-fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText) {
+fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText) -> usize {
     let mut height = 0;
 
     for cell in row {
@@ -42,7 +45,7 @@ fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText) {
     formatted.append_lines(height);
 
     if columns.is_empty() {
-        return;
+        return 0;
     }
 
     let last_index = columns.len() - 1;
@@ -64,6 +67,8 @@ fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText) {
             }
         }
     }
+
+    height
 }
 
 impl Table {
@@ -75,11 +80,34 @@ impl Table {
             rows: rows.into(),
             formatted_header: RichText::new(),
             formatted_rows: Vec::new(),
+            width:  0,
+            header_height: 0,
+            rows_height: 0,
         };
 
         table.format();
 
         table
+    }
+
+    #[inline]
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    #[inline]
+    pub fn header_height(&self) -> usize {
+        self.header_height
+    }
+
+    #[inline]
+    pub fn rows_height(&self) -> usize {
+        self.rows_height
+    }
+
+    #[inline]
+    pub fn height(&self) -> usize {
+        self.header_height + self.rows_height
     }
 
     pub fn set_columns(&mut self, column_defs: impl IntoIterator<Item = ColumnDef>) {
@@ -103,11 +131,14 @@ impl Table {
         }
 
         self.formatted_rows.reserve(1 + self.rows.len());
-        format_row(&self.columns, &self.header, &mut self.formatted_header);
+        self.header_height = format_row(&self.columns, &self.header, &mut self.formatted_header);
 
+        self.rows_height = 0;
         for row in &self.rows {
-            format_row(&self.columns, row, self.formatted_rows.push_mut(RichText::new()));
+            self.rows_height += format_row(&self.columns, row, self.formatted_rows.push_mut(RichText::new()));
         }
+
+        self.width = self.columns.iter().map(Column::width).sum();
     }
 
     #[inline]
@@ -144,7 +175,7 @@ impl Table {
         let end_height = height as i32 + scroll_row;
 
         if end_height < 0 {
-            return Ok(());
+            //return Ok(());
         }
 
         let end_height = end_height as usize;
@@ -156,15 +187,20 @@ impl Table {
         let mut scoped_state = ScopedTermIOState::default_bg(termio, odd_bg);
         let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), fg);
 
+        let draw_column = if scroll_column < 0 { column - scroll_column } else { column };
+
+        let crop_width = if scroll_column < 0 { width + -scroll_column as u32 } else { width };
+
         {
             scoped_state.termio_mut().font_weight(FontWeight::Bold)?;
 
             let res = self.formatted_header.draw_cropped(
                 scoped_state.termio_mut(),
-                row + scroll_row as i32,
-                column + scroll_column as i32,
-                0, 0,
-                width,
+                row,
+                draw_column,
+                0,
+                scroll_column.max(0) as u32,
+                crop_width,
                 height,
             );
 
@@ -173,20 +209,23 @@ impl Table {
             res?;
         }
 
-        let mut acc_height = self.formatted_header.height();
+        let header_height = self.formatted_header.height();
+        let mut acc_height = header_height;
 
         let mut current_row_index = 0;
 
         // XXX: lots of bugs
         while current_row_index < self.formatted_rows.len() {
             let row_height = self.formatted_rows[current_row_index].height();
-            if acc_height + row_height >= scroll_row as usize {
+            if acc_height as i32 + row_height as i32 + scroll_row >= 0 {
                 break;
             }
 
             acc_height += row_height;
             current_row_index += 1;
         }
+
+        let crop_column = scroll_column.max(0) as u32;
 
         while current_row_index < self.formatted_rows.len() {
             if acc_height >= end_height {
@@ -206,16 +245,21 @@ impl Table {
                 ScopedTermIOState::none(scoped_state.termio_mut())
             };
 
-            let res = table_row.draw_cropped(
-                scoped_state.termio_mut(),
-                row + scroll_row as i32 + acc_height as i32,
-                column + scroll_column as i32,
-                0, 0,
-                width,
-                height - acc_height as u32,
-            );
+            let acc_body_height = acc_height - header_height;
 
-            res?;
+            if acc_body_height > height as usize {
+                break; // XXX: should not be necessary
+            }
+
+            table_row.draw_cropped(
+                scoped_state.termio_mut(),
+                row + header_height as i32 + (acc_body_height as i32 + scroll_row).max(0),
+                draw_column,
+                0,
+                crop_column,
+                crop_width,
+                height - acc_body_height as u32,
+            )?;
 
             acc_height += table_row.height();
             current_row_index += 1;
