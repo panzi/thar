@@ -136,7 +136,7 @@ A last line.";
         return Ok(());
     }
 
-    if 1 == 1 {
+    if 1 == 2 {
         // debug events
         let mut termio = termio::TermIO::from_tty()?;
 
@@ -144,7 +144,7 @@ A last line.";
         termio.flush()?;
 
         while let Some(event) = termio.wait()? {
-            println!("{event:?}");
+            println!("{event}");
             match event {
                 Event::KeyPress { key: Key::Char('q'), alt: false, ctrl: false, shift: false } => {
                     break;

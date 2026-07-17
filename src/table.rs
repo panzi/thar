@@ -237,6 +237,7 @@ impl Table {
         let scroll_row = self.scroll_row;
         let scroll_column = self.scroll_column;
         let selected_row_index = self.selected_row_index;
+
         let end_height = height as i32 + (-scroll_row).max(0);
 
         if end_height < 0 {
@@ -274,25 +275,24 @@ impl Table {
         }
 
         let header_height = self.formatted_header.height();
-        let mut acc_height = header_height;
+        let mut body_height = 0;
 
         let mut current_row_index = 0;
 
-        // XXX: lots of bugs
         while current_row_index < self.formatted_rows.len() {
             let row_height = self.formatted_rows[current_row_index].height();
-            if acc_height as i32 + row_height as i32 + scroll_row >= 0 {
+            if body_height as i32 + row_height as i32 + scroll_row >= header_height as i32 {
                 break;
             }
 
-            acc_height += row_height;
+            body_height += row_height;
             current_row_index += 1;
         }
 
         let crop_column = scroll_column.max(0) as u32;
 
         while current_row_index < self.formatted_rows.len() {
-            if acc_height >= end_height {
+            if body_height >= end_height {
                 break;
             }
 
@@ -309,23 +309,17 @@ impl Table {
                 ScopedTermIOState::none(scoped_state.termio_mut())
             };
 
-            let acc_body_height = acc_height - header_height;
-
-            //if acc_body_height > height as usize {
-            //    break; // XXX: should not be necessary
-            //}
-
             table_row.draw_cropped(
                 scoped_state.termio_mut(),
-                row + header_height as i32 + (acc_body_height as i32 + scroll_row).max(0),
+                row + header_height as i32 + (body_height as i32 + scroll_row).max(0),
                 draw_column,
                 0,
                 crop_column,
                 crop_width,
-                height - acc_body_height as u32,
+                height - body_height as u32,
             )?;
 
-            acc_height += table_row.height();
+            body_height += table_row.height();
             current_row_index += 1;
         }
 
