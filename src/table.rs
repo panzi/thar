@@ -17,6 +17,10 @@ pub struct Table {
 }
 
 fn gather_widths(columns: &mut Vec<Column>, row: &[RichText]) {
+    if row.len() > columns.len() {
+        columns.reserve(row.len() - columns.len());
+    }
+
     for (index, cell) in row.iter().enumerate() {
         let column = if let Some(column) = columns.get_mut(index) {
             column
@@ -61,6 +65,7 @@ fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText) ->
             formatted.right_pad(width);
         } else {
             let mut cell = cell.clone();
+            cell.bottom_pad(formatted.height());
             cell.left_pad(column.width());
 
             formatted.vertical_append(&cell);
@@ -177,6 +182,10 @@ impl Table {
         }
 
         self.width = self.columns.iter().map(Column::width).sum();
+
+        if self.columns.len() > 0 {
+            self.width += self.columns.len() - 1;
+        }
     }
 
     #[inline]
@@ -335,25 +344,27 @@ impl Widget for Table {
 
     fn handle_event(&mut self, event: &Event) {
         match event {
-            Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
+            Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
                 if self.scroll_row > 0 {
                     self.scroll_row -= 1;
                     self.clamp_scroll();
+                    // TODO: change selected row instead
                 }
             }
-            Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
+            Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
                 if self.scroll_row < u32::MAX {
                     self.scroll_row += 1;
                     self.clamp_scroll();
+                    // TODO: change selected row instead
                 }
             }
-            Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
+            Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
                 if self.scroll_column > 0 {
                     self.scroll_column -= 1;
                     self.clamp_scroll();
                 }
             }
-            Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
+            Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
                 if self.scroll_column < u32::MAX {
                     self.scroll_column += 1;
                     self.clamp_scroll();

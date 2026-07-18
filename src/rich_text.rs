@@ -460,7 +460,7 @@ impl RichText {
                             new_text.push(' ');
                         }
                         new_text.push_str(&text);
-                        std::mem::swap(&mut new_text, text);
+                        *text = new_text;
                         *text_width += diff;
                     } else {
                         let text = " ".repeat(diff);
@@ -469,6 +469,21 @@ impl RichText {
                 }
             }
             self.width = width;
+        }
+    }
+
+    pub fn top_pad(&mut self, height: usize) {
+        if height > self.height() {
+            let mut new_lines = Vec::with_capacity(height);
+            new_lines.resize_with(height - self.height(), Vec::new);
+            new_lines.extend(self.lines.drain(..));
+            self.lines = new_lines;
+        }
+    }
+
+    pub fn bottom_pad(&mut self, height: usize) {
+        if height > self.height() {
+            self.lines.resize_with(height, Vec::new);
         }
     }
 

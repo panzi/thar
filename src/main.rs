@@ -247,9 +247,12 @@ A last line.";
     }
 
     //drop(termio);
-    //println!("{}", view_state.entries_table.rows()[0].iter().map(|row| row.width()).sum::<usize>() + view_state.entries_table.rows()[0].len() - 1);
-    //println!("{:#?}", view_state.entries_table.formatted_rows[0]);
-    //println!("{:#?}", view_state.entries_table.rows()[0]);
+    //println!("{}", view_state.entries_table.columns().iter().map(|row| row.width()).sum::<usize>() + view_state.entries_table.columns().len() - 1);
+    //println!("{:#?}", view_state.entries_table.formatted_rows[0].width());
+    //println!("{:?}", view_state.entries_table.columns().iter().map(Column::width).collect::<Vec<usize>>());
+    //for (index, row) in view_state.entries_table.formatted_rows.iter().enumerate() {
+    //    println!("{index} {}", row.width());
+    //}
 
     Ok(())
 }
