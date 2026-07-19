@@ -159,12 +159,20 @@ A last line.";
 
     let args = Args::parse();
 
-    let har: HAR = if let Some(path) = args.path {
+    let mut har: HAR = if let Some(path) = args.path {
         let file = File::open(path)?;
         serde_json::from_reader(BufReader::new(file))?
     } else {
         serde_json::from_reader(std::io::stdin())?
     };
+
+    {
+        // DEBUG: make list big
+        let entry_len = har.log.entries.len();
+        for _ in 0..10 {
+            har.log.entries.extend_from_within(0..entry_len);
+        }
+    }
 
     let mut termio = termio::TermIO::from_tty()?;
     let mut view_state = ViewState::default();
@@ -173,6 +181,7 @@ A last line.";
     view_state.pages_label.append_rich_text("[bg=black][color=white][u]P[/u]ages[/color][/bg]").unwrap();
 
     let entry_columns = [
+        EntryField::Index,
         EntryField::Request(RequestField::Method),
         EntryField::Request(RequestField::Url),
         EntryField::Response(ResponseField::Status),
@@ -187,13 +196,13 @@ A last line.";
     view_state.entries_table.set_columns(entry_columns.map(Into::into));
 
     let mut buf = String::new();
-    for entry in &har.log.entries {
+    for (index, entry) in har.log.entries.iter().enumerate() {
         let mut row = Vec::new();
         for column in &entry_columns {
             buf.clear();
 
             let mut cell = RichText::new();
-            column.write_rich_text(entry, &mut cell, &mut buf).unwrap();
+            column.write_rich_text(index, entry, &mut cell, &mut buf).unwrap();
 
             row.push(cell);
         }
@@ -277,7 +286,7 @@ fn full_redraw(termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<(
         match view_state.active_view {
             ActiveView::EntryList => {
                 //view_state.entries_table.formatted_rows[0].draw(termio, 1, 0)?;
-                view_state.entries_table.draw(termio)?;
+                view_state.entries_table.draw(termio, 0, 0)?;
             }
             ActiveView::PageList => {
 

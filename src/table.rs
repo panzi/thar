@@ -240,6 +240,67 @@ impl Table {
             }
         }
     }
+
+    fn after_selection_up(&mut self) {
+        if self.header_height >= self.draw_rect.height as usize {
+            self.scroll_row = 0;
+        } else {
+            let avail_height = self.draw_rect.height as usize - self.header_height;
+            let mut body_height = 0;
+            let mut selected_top = 0;
+            let mut selected_height = 0;
+
+            for (index, row) in self.formatted_rows.iter().enumerate() {
+                if index == self.selected_row_index {
+                    selected_top = body_height;
+                    selected_height = row.height();
+                    break;
+                }
+                body_height += row.height();
+            }
+
+            if selected_top < self.scroll_row as usize {
+                self.scroll_row = selected_top as u32;
+            } else if selected_top + selected_height > self.scroll_row as usize + avail_height {
+                if selected_height > avail_height {
+                    self.scroll_row = selected_top as u32;
+                } else {
+                    self.scroll_row = (selected_top + selected_height - avail_height) as u32;
+                }
+            }
+        }
+    }
+
+    fn after_selection_down(&mut self) {
+        if self.header_height >= self.draw_rect.height as usize {
+            self.scroll_row = 0;
+        } else {
+            let avail_height = self.draw_rect.height as usize - self.header_height;
+            let mut body_height = 0;
+            let mut selected_top = 0;
+            let mut selected_height = 0;
+
+            for (index, row) in self.formatted_rows.iter().enumerate() {
+                if index == self.selected_row_index {
+                    selected_top = body_height;
+                    selected_height = row.height();
+                    break;
+                } else {
+                    body_height += row.height();
+                }
+            }
+
+            if selected_top + selected_height > self.scroll_row as usize + avail_height {
+                if selected_height > avail_height {
+                    self.scroll_row = selected_top as u32;
+                } else {
+                    self.scroll_row = (selected_top + selected_height - avail_height) as u32;
+                }
+            } else if selected_top < self.scroll_row as usize {
+                self.scroll_row = selected_top as u32;
+            }
+        }
+    }
 }
 
 impl Widget for Table {
@@ -254,9 +315,11 @@ impl Widget for Table {
         self.clamp_scroll();
     }
 
-    fn draw(&self, termio: &mut TermIO) -> std::io::Result<()> {
+    fn draw(&self, termio: &mut TermIO, global_row: i32, global_column: i32) -> std::io::Result<()> {
         let Rect { row, column, width, height } = self.draw_rect;
         let &Table { scroll_row, scroll_column, selected_row_index, .. } = self;
+        let row    = row    + global_row;
+        let column = column + global_column;
 
         let even_bg = Color::from_u32(0x555555);
         let odd_bg = Color::Color16(Color16::Black);
@@ -344,18 +407,39 @@ impl Widget for Table {
 
     fn handle_event(&mut self, event: &Event) {
         match event {
+            Event::KeyPress { key: Key::Enter, alt: false, ctrl: false, shift: false } => {
+                // TODO: somehow singal to open the selected record
+            }
             Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
-                if self.scroll_row > 0 {
-                    self.scroll_row -= 1;
-                    self.clamp_scroll();
-                    // TODO: change selected row instead
+                if self.selected_row_index > 0 {
+                    self.selected_row_index -= 1;
+
+                    self.after_selection_up();
+                }
+            }
+            Event::KeyPress { key: Key::Home, alt: false, ctrl: false, shift: false } => {
+                if self.selected_row_index > 0 {
+                    self.selected_row_index = 0;
+
+                    self.after_selection_up();
                 }
             }
             Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
-                if self.scroll_row < u32::MAX {
-                    self.scroll_row += 1;
-                    self.clamp_scroll();
-                    // TODO: change selected row instead
+                if self.formatted_rows.is_empty() {
+                    self.selected_row_index = 0;
+                    self.scroll_row = 0;
+                } else if self.selected_row_index < self.formatted_rows.len() - 1 {
+                    self.selected_row_index += 1;
+                    self.after_selection_down();
+                }
+            }
+            Event::KeyPress { key: Key::End, alt: false, ctrl: false, shift: false } => {
+                if self.formatted_rows.is_empty() {
+                    self.selected_row_index = 0;
+                    self.scroll_row = 0;
+                } else if self.selected_row_index < self.formatted_rows.len() - 1 {
+                    self.selected_row_index = self.formatted_rows.len() - 1;
+                    self.after_selection_down();
                 }
             }
             Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
@@ -367,6 +451,91 @@ impl Widget for Table {
             Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
                 if self.scroll_column < u32::MAX {
                     self.scroll_column += 1;
+                    self.clamp_scroll();
+                }
+            }
+            Event::KeyPress { key: Key::Home, alt: false, ctrl: true, shift: false } => {
+                if self.scroll_column > 0 {
+                    self.scroll_column = 0;
+                }
+            }
+            Event::KeyPress { key: Key::End, alt: false, ctrl: true, shift: false } => {
+                if self.scroll_column < u32::MAX {
+                    if self.draw_rect.width as usize > self.width {
+                        self.scroll_column = 0;
+                    } else {
+                        let max_overflow = (self.width - self.draw_rect.width as usize) as u32;
+                        self.scroll_column = max_overflow;
+                    }
+                }
+            }
+            Event::KeyPress { key: Key::PageUp, alt: false, ctrl: false, shift: false } => {
+                if self.header_height >= self.draw_rect.height as usize {
+                    self.scroll_row = 0;
+                } else if self.selected_row_index > 0 {
+                    let avail_height = self.draw_rect.height as usize - self.header_height;
+                    let mut body_height = 0;
+                    let mut selected_top = 0;
+
+                    for (index, row) in self.formatted_rows.iter().enumerate() {
+                        if index == self.selected_row_index {
+                            selected_top = body_height;
+                            break;
+                        }
+                        body_height += row.height();
+                    }
+
+                    let mut page_height = 0;
+                    let old_selected_top = selected_top;
+
+                    while page_height < avail_height && self.selected_row_index > 0 {
+                        self.selected_row_index -= 1;
+
+                        let row = &self.formatted_rows[self.selected_row_index];
+                        let selected_height = row.height();
+                        selected_top -= selected_height;
+                        page_height += selected_height;
+                    }
+
+                    let scroll_diff = old_selected_top - selected_top;
+                    if scroll_diff > self.scroll_row as usize {
+                        // can't happen
+                        self.scroll_row = 0;
+                    } else {
+                        self.scroll_row -= scroll_diff as u32;
+                    }
+                }
+            }
+            Event::KeyPress { key: Key::PageDown, alt: false, ctrl: false, shift: false } => {
+                if self.header_height >= self.draw_rect.height as usize {
+                    self.scroll_row = 0;
+                } else if self.selected_row_index < self.formatted_rows.len() {
+                    let avail_height = self.draw_rect.height as usize - self.header_height;
+                    let mut body_height = 0;
+                    let mut selected_top = 0;
+
+                    for (index, row) in self.formatted_rows.iter().enumerate() {
+                        if index == self.selected_row_index {
+                            selected_top = body_height;
+                            break;
+                        }
+                        body_height += row.height();
+                    }
+
+                    let mut page_height = 0;
+                    let old_selected_top = selected_top;
+
+                    while page_height < avail_height && self.selected_row_index + 1 < self.formatted_rows.len() {
+                        self.selected_row_index += 1;
+
+                        let row = &self.formatted_rows[self.selected_row_index];
+                        let selected_height = row.height();
+                        selected_top += selected_height;
+                        page_height += selected_height;
+                    }
+
+                    let scroll_diff = selected_top - old_selected_top;
+                    self.scroll_row += scroll_diff as u32;
                     self.clamp_scroll();
                 }
             }

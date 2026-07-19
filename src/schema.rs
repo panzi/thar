@@ -50,6 +50,7 @@ pub struct Entry {
     pub pageref: Option<String>,
     #[serde(rename = "startedDateTime", with = "time::serde::iso8601")]
     pub started_date_time: OffsetDateTime,
+    #[serde(default = "unavailable_i64")]
     pub time: i64,
     pub request: Request,
     pub response: Option<Response>,

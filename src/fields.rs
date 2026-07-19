@@ -5,7 +5,7 @@ use std::fmt::Write;
 pub trait Field {
     fn header(&self) -> &str;
     fn align(&self) -> Align;
-    fn write_rich_text(&self, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result;
+    fn write_rich_text(&self, index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result;
 
     #[inline]
     fn to_column_def(&self) -> ColumnDef {
@@ -25,6 +25,7 @@ impl<F> From<F> for ColumnDef where F: Field {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryField {
+    Index,
     StartedDateTime,
     Time,
     Request(RequestField),
@@ -40,6 +41,7 @@ impl Field for EntryField {
     #[inline]
     fn header(&self) -> &str {
         match self {
+            Self::Index            => "Index",
             Self::StartedDateTime  => "Started At",
             Self::Time             => "Time",
             Self::Request(req)     => req.header(),
@@ -55,6 +57,7 @@ impl Field for EntryField {
     #[inline]
     fn align(&self) -> Align {
         match self {
+            Self::Index            => Align::Right,
             Self::StartedDateTime  => Align::Left,
             Self::Time             => Align::Right,
             Self::Request(req)     => req.align(),
@@ -67,8 +70,12 @@ impl Field for EntryField {
         }
     }
 
-    fn write_rich_text(&self, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
+            Self::Index => {
+                write!(buf, "{index}")?;
+                rich_text.append_plain_text(buf);
+            }
             Self::StartedDateTime => {
                 write!(buf, "{}", entry.started_date_time)?;
                 rich_text.append_plain_text(buf);
@@ -78,16 +85,16 @@ impl Field for EntryField {
                 rich_text.append_plain_text(buf);
             }
             Self::Request(req) => {
-                req.write_rich_text(entry, rich_text, buf)?;
+                req.write_rich_text(index, entry, rich_text, buf)?;
             }
             Self::Response(res) => {
-                res.write_rich_text(entry, rich_text, buf)?;
+                res.write_rich_text(index, entry, rich_text, buf)?;
             }
             Self::Cache(cache) => {
-                cache.write_rich_text(entry, rich_text, buf)?;
+                cache.write_rich_text(index, entry, rich_text, buf)?;
             }
             Self::Timings(timings) => {
-                timings.write_rich_text(entry, rich_text, buf)?;
+                timings.write_rich_text(index, entry, rich_text, buf)?;
             }
             Self::ServerIpAddress => {
                 if let Some(server_ip_address) = &entry.server_ip_address {
@@ -184,7 +191,7 @@ impl Field for RequestField {
         }
     }
 
-    fn write_rich_text(&self, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, _index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Method => {
                 let style = RichTextStyle::build().foreground(get_method_color(&entry.request.method)).into_inner();
@@ -304,7 +311,7 @@ impl Field for ResponseField {
         }
     }
 
-    fn write_rich_text(&self, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         let Some(response) = &entry.response else {
             return Ok(())
         };
@@ -326,7 +333,7 @@ impl Field for ResponseField {
                 }
             },
             Self::Content(content) => {
-                content.write_rich_text(entry, rich_text, buf)?;
+                content.write_rich_text(index, entry, rich_text, buf)?;
             },
             Self::HeadersSize => {
                 write!(buf, "{}", response.headers_size)?;
@@ -379,7 +386,7 @@ impl Field for ContentField {
         }
     }
 
-    fn write_rich_text(&self, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, _index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         let Some(response) = &entry.response else {
             return Ok(());
         };
@@ -456,7 +463,7 @@ impl Field for CacheField {
         }
     }
 
-    fn write_rich_text(&self, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, _index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         let Some(cache) = &entry.cache else {
             return Ok(());
         };
@@ -588,7 +595,7 @@ impl Field for TimingsField {
         }
     }
 
-    fn write_rich_text(&self, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, _index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         let Some(timings) = &entry.timings else {
             return Ok(());
         };

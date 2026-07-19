@@ -560,7 +560,7 @@ impl TermIO {
         }
 
         loop {
-            match self.epoll.wait(&mut self.events, None) {
+            match self.epoll.wait(&mut self.events, None, None) {
                 Ok(count) => {
                     let mut has_data = false;
 
@@ -823,10 +823,73 @@ impl TermIO {
 
             self.buffer_index += 1;
 
+            if flag == 0 && self.uint_buffer.len() == 2 && self.uint_buffer[0] == 1 {
+                let map = self.uint_buffer[1] - 1;
+                let shift = (map & 1) != 0;
+                let alt   = (map & 2) != 0;
+                let ctrl  = (map & 4) != 0;
+                // TODO: let meta  = (map & 8) != 0;
+
+                match byte {
+                    b'A' => { return Ok(Some(Event::KeyPress { key: Key::Up,      ctrl, alt, shift })); }
+                    b'B' => { return Ok(Some(Event::KeyPress { key: Key::Down,    ctrl, alt, shift })); }
+                    b'C' => { return Ok(Some(Event::KeyPress { key: Key::Right,   ctrl, alt, shift })); }
+                    b'D' => { return Ok(Some(Event::KeyPress { key: Key::Left,    ctrl, alt, shift })); }
+                    b'F' => { return Ok(Some(Event::KeyPress { key: Key::End,     ctrl, alt, shift })); }
+                    b'E' => { return Ok(Some(Event::KeyPress { key: Key::Keypad5, ctrl, alt, shift })); }
+                    b'G' => { return Ok(Some(Event::KeyPress { key: Key::Keypad5, ctrl, alt, shift })); }
+                    b'H' => { return Ok(Some(Event::KeyPress { key: Key::Home,    ctrl, alt, shift })); }
+                    b'P' => { return Ok(Some(Event::KeyPress { key: Key::Pause,   ctrl, alt, shift })); }
+                    _ => {}
+                }
+            }
+
             match (flag, byte, self.uint_buffer.len()) {
                 (0, b'~', 0) => {
                     // no number defaults to 1
                     return Ok(Some(Event::key(Key::Home)));
+                }
+                (0, b'~', 2) => {
+                    let map = self.uint_buffer[1] - 1;
+                    let shift = (map & 1) != 0;
+                    let alt   = (map & 2) != 0;
+                    let ctrl  = (map & 4) != 0;
+                    // TODO: let meta  = (map & 8) != 0;
+
+                    match self.uint_buffer[0] {
+                        2 => { return Ok(Some(Event::KeyPress { key: Key::Insert, ctrl, alt, shift })); }
+                        3 => { return Ok(Some(Event::KeyPress { key: Key::Delete, ctrl, alt, shift })); }
+                        4 => { return Ok(Some(Event::KeyPress { key: Key::End, ctrl, alt, shift })); }
+                        5 => { return Ok(Some(Event::KeyPress { key: Key::PageUp, ctrl, alt, shift })); }
+                        6 => { return Ok(Some(Event::KeyPress { key: Key::PageDown, ctrl, alt, shift })); }
+                        7 => { return Ok(Some(Event::KeyPress { key: Key::Home, ctrl, alt, shift })); }
+                        8 => { return Ok(Some(Event::KeyPress { key: Key::End, ctrl, alt, shift })); }
+
+                        15 => { return Ok(Some(Event::KeyPress { key: Key::Function(5), ctrl, alt, shift })); }
+
+                        17 => { return Ok(Some(Event::KeyPress { key: Key::Function(6), ctrl, alt, shift })); }
+                        18 => { return Ok(Some(Event::KeyPress { key: Key::Function(7), ctrl, alt, shift })); }
+                        19 => { return Ok(Some(Event::KeyPress { key: Key::Function(8), ctrl, alt, shift })); }
+                        20 => { return Ok(Some(Event::KeyPress { key: Key::Function(9), ctrl, alt, shift })); }
+                        21 => { return Ok(Some(Event::KeyPress { key: Key::Function(10), ctrl, alt, shift })); }
+
+                        23 => { return Ok(Some(Event::KeyPress { key: Key::Function(11), ctrl, alt, shift })); }
+                        24 => { return Ok(Some(Event::KeyPress { key: Key::Function(12), ctrl, alt, shift })); }
+                        25 => { return Ok(Some(Event::KeyPress { key: Key::Function(13), ctrl, alt, shift })); }
+                        26 => { return Ok(Some(Event::KeyPress { key: Key::Function(14), ctrl, alt, shift })); }
+
+                        28 => { return Ok(Some(Event::KeyPress { key: Key::Function(15), ctrl, alt, shift })); }
+                        29 => { return Ok(Some(Event::KeyPress { key: Key::Function(16), ctrl, alt, shift })); }
+
+                        31 => { return Ok(Some(Event::KeyPress { key: Key::Function(17), ctrl, alt, shift })); }
+                        32 => { return Ok(Some(Event::KeyPress { key: Key::Function(18), ctrl, alt, shift })); }
+                        33 => { return Ok(Some(Event::KeyPress { key: Key::Function(19), ctrl, alt, shift })); }
+                        34 => { return Ok(Some(Event::KeyPress { key: Key::Function(20), ctrl, alt, shift })); }
+
+                        _ => {
+                            return Ok(Some(Event::Unsupported));
+                        }
+                    }
                 }
                 (0, b'~', 1) => {
                     match self.uint_buffer[0] {

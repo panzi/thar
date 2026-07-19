@@ -96,7 +96,7 @@ impl EPoll {
         Ok(())
     }
 
-    pub fn wait(&mut self, events: &mut [Event], timeout: Option<Duration>) -> std::io::Result<usize> {
+    pub fn wait(&mut self, events: &mut [Event], timeout: Option<Duration>, sigmask: Option<&SigSet>) -> std::io::Result<usize> {
         let maxevents = events.len();
         if maxevents > i32::MAX as usize {
             return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
@@ -115,13 +115,19 @@ impl EPoll {
             std::ptr::null()
         };
 
+        let sigmask = if let Some(sigmask) = sigmask {
+            &sigmask.0
+        } else {
+            std::ptr::null()
+        };
+
         let res = unsafe {
             libc::epoll_pwait2(
                 self.fd,
                 events.as_mut_ptr() as *mut libc::epoll_event,
                 maxevents as i32,
                 timeout,
-                std::ptr::null()
+                sigmask,
             )
         };
 
@@ -136,6 +142,12 @@ impl EPoll {
 impl Drop for EPoll {
     #[inline]
     fn drop(&mut self) {
+        #[cfg(debug_assertions)]
+        if unsafe { libc::close(self.fd) } != 0 {
+            eprintln!("Error closing epoll file descriptor: {}", std::io::Error::last_os_error());
+        }
+
+        #[cfg(not(debug_assertions))]
         unsafe { libc::close(self.fd); }
     }
 }
@@ -161,5 +173,61 @@ bitflags! {
         const OneShot       = libc::EPOLLONESHOT   as u32;
         const Wakeup        = libc::EPOLLWAKEUP    as u32;
         const Exclusive     = libc::EPOLLEXCLUSIVE as u32;
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SigSet(libc::sigset_t);
+
+impl SigSet {
+    #[inline]
+    pub fn new_empty() -> Self {
+        let mut set = std::mem::MaybeUninit::uninit();
+        // can only error if the pointer is NULL
+        unsafe { libc::sigemptyset(set.as_mut_ptr()); }
+        SigSet(unsafe { set.assume_init() })
+    }
+
+    #[inline]
+    pub fn new_full() -> Self {
+        let mut set = std::mem::MaybeUninit::uninit();
+        // can only error if the pointer is NULL
+        unsafe { libc::sigfillset(set.as_mut_ptr()); }
+        SigSet(unsafe { set.assume_init() })
+    }
+
+    #[inline]
+    pub fn empty(&mut self) {
+        // can only error if the pointer is NULL
+        unsafe { libc::sigemptyset(&mut self.0); }
+    }
+
+    #[inline]
+    pub fn fill(&mut self) {
+        // can only error if the pointer is NULL
+        unsafe { libc::sigfillset(&mut self.0); }
+    }
+
+    #[inline]
+    pub fn add(&mut self, signum: libc::c_int) -> std::io::Result<()> {
+        if unsafe { libc::sigaddset(&mut self.0, signum) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn del(&mut self, signum: libc::c_int) -> std::io::Result<()> {
+        if unsafe { libc::sigdelset(&mut self.0, signum) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn ismember(&self, signum: libc::c_int) -> bool {
+        unsafe { libc::sigismember(&self.0, signum) != 0 }
     }
 }
