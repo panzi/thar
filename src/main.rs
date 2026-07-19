@@ -16,6 +16,7 @@ pub mod rich_text;
 pub mod fields;
 pub mod table;
 pub mod widget;
+pub mod tabs;
 
 #[derive(Parser)]
 struct Args {
@@ -235,7 +236,7 @@ A last line.";
         for (index, page) in har.log.pages.iter().enumerate() {
             let mut row = Vec::new();
             for column in &page_columns {
-                buf.clear();;
+                buf.clear();
 
                 let mut cell = RichText::new();
                 column.write_rich_text(index, page, &mut cell, &mut buf).unwrap();
