@@ -1,9 +1,9 @@
-use crate::{event::{Event, Key}, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::Widget};
+use crate::{color::{Color, Color16}, event::{Event, Key}, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::Widget};
 
 #[derive(Debug)]
 pub struct Tab {
     pub title: String,
-    pub menonic: char,
+    pub mnemonic: char,
     pub content: Box<dyn TabContent>,
 }
 
@@ -31,14 +31,27 @@ impl Tabs {
     }
 
     fn update(&mut self) {
-        let style = RichTextStyle::build().text_decoration(TextDecoration::Underline).into();
+        let fg = Color::Color16(Color16::White);
+        let bg = Color::Color16(Color16::Black);
+
+        let style = RichTextStyle::build()
+            .foreground(fg)
+            .background(bg)
+            .into();
+
+        let mnemonic_style = RichTextStyle::build()
+            .foreground(fg)
+            .background(bg)
+            .text_decoration(TextDecoration::Underline)
+            .into();
+
         for tab in &self.tabs {
             let mut label = RichText::new();
-            if let Some(index) = tab.title.find(|ch: char| ch.eq_ignore_ascii_case(&tab.menonic)) {
-                label.append_plain_text(&tab.title[..index]);
+            if let Some(index) = tab.title.find(|ch: char| ch.eq_ignore_ascii_case(&tab.mnemonic)) {
+                label.append_text(&style, &tab.title[..index]);
                 let next_index = tab.title.ceil_char_boundary(index + 1);
-                label.append_text(&style, &tab.title[index..next_index]);
-                label.append_plain_text(&tab.title[next_index..]);
+                label.append_text(&mnemonic_style, &tab.title[index..next_index]);
+                label.append_text(&style, &tab.title[next_index..]);
             }
             self.formatted_tabs.push(label);
         }
@@ -65,9 +78,8 @@ impl Widget for Tabs {
     fn set_draw_rect(&mut self, rect: &Rect) {
         self.draw_rect = *rect;
 
-        if self.selected_tab_index < self.tabs.len() {
-            let child = &mut self.tabs[self.selected_tab_index].content;
-            child.set_draw_rect(&Rect {
+        if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
+            tab.content.set_draw_rect(&Rect {
                 row: rect.row + 1,
                 height: if rect.height > 0 { rect.height - 1 } else { 0 },
                 ..*rect
@@ -93,9 +105,11 @@ impl Widget for Tabs {
             tab_column += tab.width() as i32;
         }
 
+        termio.set_inverted(false);
+
         if self.selected_tab_index < self.tabs.len() {
             let child = &self.tabs[self.selected_tab_index].content;
-            child.draw(termio, parent_row + 1, parent_column)?;
+            child.draw(termio, parent_row, parent_column)?;
         }
 
         Ok(())
@@ -104,7 +118,7 @@ impl Widget for Tabs {
     fn handle_event(&mut self, event: &Event) {
         if let Event::KeyPress { key: Key::Char(ch), ctrl: false, alt: true, shift: false } = event {
             for (index, tab) in self.tabs.iter_mut().enumerate() {
-                if tab.menonic.eq_ignore_ascii_case(ch) {
+                if tab.mnemonic.eq_ignore_ascii_case(ch) {
                     self.selected_tab_index = index;
 
                     tab.content.set_draw_rect(&Rect {
@@ -117,9 +131,8 @@ impl Widget for Tabs {
             }
         }
 
-        if self.selected_tab_index < self.tabs.len() {
-            let child = &mut self.tabs[self.selected_tab_index].content;
-            event.send_to(child.as_mut());
+        if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
+            event.send_to(tab.content.as_mut());
         }
     }
 }

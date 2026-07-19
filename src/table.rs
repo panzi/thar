@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, event::{Event, Key}, rect::Rect, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::Widget};
+use crate::{color::{Color, Color16}, event::{Event, Key}, rect::Rect, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, tabs::TabContent, termio::TermIO, widget::Widget};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Table {
@@ -15,6 +15,8 @@ pub struct Table {
     selected_row_index: usize,
     draw_rect: Rect,
 }
+
+impl TabContent for Table {}
 
 fn gather_widths(columns: &mut Vec<Column>, row: &[RichText]) {
     if row.len() > columns.len() {

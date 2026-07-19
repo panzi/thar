@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, PageField, RequestField, ResponseField}, rect::Rect, rich_text::{RichText, RichTextStyle}, schema::HAR, table::Table, termio::TermIO, widget::Widget};
+use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, PageField, RequestField, ResponseField}, rect::Rect, rich_text::{RichText, RichTextStyle}, schema::HAR, table::Table, tabs::{Tab, Tabs}, termio::TermIO, widget::Widget};
 
 use clap::Parser;
 
@@ -41,13 +41,10 @@ impl Default for ActiveView {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Default)]
 pub struct ViewState {
     active_view: ActiveView,
-    requests_label: RichText,
-    pages_label: RichText,
-    entries_table: Table,
-    pages_table: Table,
+    tabs: Tabs,
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -180,11 +177,9 @@ A last line.";
     let mut termio = termio::TermIO::from_tty()?;
     let mut view_state = ViewState::default();
 
-    view_state.requests_label.append_rich_text("[bg=black][color=white][u]R[/u]equests[/color][/bg]").unwrap();
-    view_state.pages_label.append_rich_text("[bg=black][color=white][u]P[/u]ages[/color][/bg]").unwrap();
-
     {
-        let window_size = termio.window_size();
+        let mut entries_table = Table::default();
+        let mut pages_table = Table::default();
 
         // format entries table
         let entry_columns = [
@@ -200,7 +195,7 @@ A last line.";
             EntryField::Time,
         ];
 
-        view_state.entries_table.set_columns(entry_columns.map(Into::into));
+        entries_table.set_columns(entry_columns.map(Into::into));
 
         let mut buf = String::new();
         for (index, entry) in har.log.entries.iter().enumerate() {
@@ -213,17 +208,11 @@ A last line.";
 
                 row.push(cell);
             }
-            view_state.entries_table.rows_mut().push(row);
+            entries_table.rows_mut().push(row);
         }
 
-        view_state.entries_table.set_draw_rect(&Rect {
-            row: 1,
-            column: 0,
-            width: window_size.columns,
-            height: if window_size.rows > 0 { window_size.rows - 1 } else { 0 },
-        });
 
-        view_state.entries_table.update();
+        entries_table.update();
 
         // format pages table
         let page_columns = [
@@ -233,7 +222,7 @@ A last line.";
             PageField::Title,
         ];
 
-        view_state.pages_table.set_columns(page_columns.map(Into::into));
+        pages_table.set_columns(page_columns.map(Into::into));
 
         for (index, page) in har.log.pages.iter().enumerate() {
             let mut row = Vec::new();
@@ -245,49 +234,55 @@ A last line.";
 
                 row.push(cell);
             }
-            view_state.pages_table.rows_mut().push(row);
+            pages_table.rows_mut().push(row);
         }
 
-        view_state.pages_table.set_draw_rect(&Rect {
-            row: 1,
+        pages_table.update();
+
+        view_state.tabs = Tabs::new([
+            Tab {
+                title: "Requests".to_string(),
+                mnemonic: 'R',
+                content: Box::new(entries_table),
+            },
+            Tab {
+                title: "Pages".to_string(),
+                mnemonic: 'P',
+                content: Box::new(pages_table),
+            },
+        ]);
+    }
+
+    {
+        let window_size = termio.window_size();
+        view_state.tabs.set_draw_rect(&Rect {
+            row: 0,
             column: 0,
             width: window_size.columns,
-            height: if window_size.rows > 0 { window_size.rows - 1 } else { 0 },
+            height: window_size.rows,
         });
-
-        view_state.pages_table.update();
     }
+
 
     full_redraw(&mut termio, &view_state)?;
 
     while let Some(event) = termio.wait()? {
         match event {
             Event::WindowSize { columns, rows } => {
-                view_state.entries_table.set_draw_rect(&Rect {
-                    row: 1,
+                view_state.tabs.set_draw_rect(&Rect {
+                    row: 0,
                     column: 0,
                     width: columns,
-                    height: if rows > 0 { rows - 1 } else { 0 },
+                    height: rows,
                 });
-            }
-            Event::KeyPress { key: Key::Char('r'), alt: true, ctrl: false, shift: false } => {
-                view_state.active_view = ActiveView::EntryList;
-            }
-            Event::KeyPress { key: Key::Char('p'), alt: true, ctrl: false, shift: false } => {
-                view_state.active_view = ActiveView::PageList;
             }
             Event::KeyPress { key: Key::Char('q'), alt: false, ctrl: false, shift: false } => {
                 break;
             }
-            _ => {
-                match view_state.active_view {
-                    ActiveView::EntryList => {
-                        view_state.entries_table.handle_event(&event);
-                    }
-                    _ => {}
-                }
-            }
+            _ => {}
         }
+
+        event.send_to(&mut view_state.tabs);
 
         full_redraw(&mut termio, &view_state)?;
     }
@@ -307,40 +302,14 @@ fn full_redraw(termio: &mut TermIO, view_state: &ViewState) -> std::io::Result<(
     termio.clear_style()?;
     termio.clear_screen()?;
 
-    termio.set_inverted(matches!(view_state.active_view, ActiveView::EntryList | ActiveView::Entry(_)));
-
-    view_state.requests_label.draw(termio, 0, 0)?;
-
-    termio.set_inverted(matches!(view_state.active_view, ActiveView::PageList | ActiveView::Page(_)));
-
-    view_state.pages_label.draw(termio, 0, view_state.requests_label.width().min(i32::MAX as usize - 1) as i32 + 1)?;
-
-    termio.set_inverted(false);
-
-    let window_size = *termio.window_size();
-
-    if window_size.rows > 0 {
-        match view_state.active_view {
-            ActiveView::EntryList => {
-                //view_state.entries_table.formatted_rows[0].draw(termio, 1, 0)?;
-                view_state.entries_table.draw(termio, 0, 0)?;
-            }
-            ActiveView::PageList => {
-
-            }
-            ActiveView::Entry(index) => {
-
-            }
-            ActiveView::Page(index) => {
-
-            }
-        }
-    }
+    let res = view_state.tabs.draw(termio, 0, 0);
 
     termio.set_default_fg(Color::Default);
     termio.set_default_bg(Color::Default);
 
     termio.flush()?;
+
+    res?;
 
     Ok(())
 }

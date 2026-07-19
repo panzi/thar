@@ -81,9 +81,10 @@ impl RichText {
         } else {
             self.lines.push_mut(Vec::new())
         };
-        let mut line_width = 0;
+        let mut line_width = line_width(line);
         let mut prev_index = 0;
 
+        // TODO: optimize style
         DEFAULT_STYLE.diff(style, &mut line);
 
         for (index, ch) in plain_text.char_indices() {
