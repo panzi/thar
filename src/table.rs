@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, event::{Event, Key}, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{Rect, Widget}};
+use crate::{color::{Color, Color16}, event::{Event, Key}, rect::Rect, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::Widget};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Table {
@@ -315,11 +315,11 @@ impl Widget for Table {
         self.clamp_scroll();
     }
 
-    fn draw(&self, termio: &mut TermIO, global_row: i32, global_column: i32) -> std::io::Result<()> {
+    fn draw(&self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
         let Rect { row, column, width, height } = self.draw_rect;
         let &Table { scroll_row, scroll_column, selected_row_index, .. } = self;
-        let row    = row    + global_row;
-        let column = column + global_column;
+        let row    = row    + parent_row;
+        let column = column + parent_column;
 
         let even_bg = Color::from_u32(0x555555);
         let odd_bg = Color::Color16(Color16::Black);

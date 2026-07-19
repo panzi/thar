@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, PageField, RequestField, ResponseField}, rich_text::{RichText, RichTextStyle}, schema::HAR, table::Table, termio::TermIO, widget::{Rect, Widget}};
+use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, PageField, RequestField, ResponseField}, rect::Rect, rich_text::{RichText, RichTextStyle}, schema::HAR, table::Table, termio::TermIO, widget::Widget};
 
 use clap::Parser;
 
@@ -17,6 +17,8 @@ pub mod fields;
 pub mod table;
 pub mod widget;
 pub mod tabs;
+pub mod rect;
+pub mod point;
 
 #[derive(Parser)]
 struct Args {

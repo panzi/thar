@@ -1,17 +1,9 @@
-use crate::{event::Event, termio::TermIO};
+use crate::{event::Event, rect::Rect, termio::TermIO};
 
 pub trait Widget {
     fn set_draw_rect(&mut self, rect: &Rect);
     fn draw_rect(&self) -> Rect;
 
-    fn draw(&self, termio: &mut TermIO, global_row: i32, global_column: i32) -> std::io::Result<()>;
+    fn draw(&self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()>;
     fn handle_event(&mut self, event: &Event);
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Rect {
-    pub row: i32,
-    pub column: i32,
-    pub width: u32,
-    pub height: u32,
 }

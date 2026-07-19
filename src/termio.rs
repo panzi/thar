@@ -940,6 +940,13 @@ impl TermIO {
                     let column = column - 1;
                     let row = row - 1;
 
+                    if column > i32::MAX as u32 || row > i32::MAX as u32 {
+                        return Ok(Some(Event::Unsupported));
+                    }
+
+                    let column = column as i32;
+                    let row = row as i32;
+
                     let shift = (flags & MOUSE_MASK_SHIFT) != 0;
                     let alt = (flags & MOUSE_MASK_ALT) != 0;
                     let ctrl = (flags & MOUSE_MASK_CTRL) != 0;
@@ -976,6 +983,13 @@ impl TermIO {
 
                     let column = column - 1;
                     let row = row - 1;
+
+                    if column > i32::MAX as u32 || row > i32::MAX as u32 {
+                        return Ok(Some(Event::Unsupported));
+                    }
+
+                    let column = column as i32;
+                    let row = row as i32;
 
                     return Ok(Some(Event::CursorPosition { row, column }));
                 }

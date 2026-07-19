@@ -1,5 +1,7 @@
 use std::fmt::Write;
 
+use crate::{point::{Point, nest_into}, widget::Widget};
+
 pub const ESCAPE: u8 = 0x1B;
 
 // move = 35
@@ -110,14 +112,14 @@ impl From<MouseButton> for u32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
-    CursorPosition { row: u32, column: u32 },
+    CursorPosition { row: i32, column: i32 },
     WindowSize { rows: u32, columns: u32 },
     KeyPress { key: Key, ctrl: bool, alt: bool, shift: bool },
-    MouseDown { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
-    MouseUp   { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
-    MouseMove { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
-    WheelUp   { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool },
-    WheelDown { row: u32, column: u32, shift: bool, ctrl: bool, alt: bool },
+    MouseDown { row: i32, column: i32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
+    MouseUp   { row: i32, column: i32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
+    MouseMove { row: i32, column: i32, shift: bool, ctrl: bool, alt: bool, button: MouseButton },
+    WheelUp   { row: i32, column: i32, shift: bool, ctrl: bool, alt: bool },
+    WheelDown { row: i32, column: i32, shift: bool, ctrl: bool, alt: bool },
     Unsupported,
 }
 
@@ -140,6 +142,45 @@ impl Event {
     #[inline]
     pub fn from_char_alt(ch: char) -> Self {
         Self::KeyPress { ctrl: false, alt: true, shift: ch.is_uppercase(), key: Key::from_char(ch) }
+    }
+
+    pub fn send_to(&self, child: &mut dyn Widget) {
+        let widget_rect = child.draw_rect();
+        match self {
+            &Self::CursorPosition { row, column } => {
+                if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
+                    child.handle_event(&Self::CursorPosition { row, column });
+                }
+            }
+            &Self::MouseDown { row, column, shift, ctrl, alt, button } => {
+                if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
+                    child.handle_event(&Self::MouseDown { row, column, shift, ctrl, alt, button });
+                }
+            }
+            &Self::MouseUp { row, column, shift, ctrl, alt, button } => {
+                if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
+                    child.handle_event(&Self::MouseUp { row, column, shift, ctrl, alt, button });
+                }
+            }
+            &Self::MouseMove { row, column, shift, ctrl, alt, button } => {
+                if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
+                    child.handle_event(&Self::MouseMove { row, column, shift, ctrl, alt, button });
+                }
+            }
+            &Self::WheelUp { row, column, shift, ctrl, alt } => {
+                if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
+                    child.handle_event(&Self::WheelUp { row, column, shift, ctrl, alt });
+                }
+            }
+            &Self::WheelDown { row, column, shift, ctrl, alt } => {
+                if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
+                    child.handle_event(&Self::WheelDown { row, column, shift, ctrl, alt });
+                }
+            }
+            _ => {
+                child.handle_event(self);
+            }
+        }
     }
 }
 
@@ -189,7 +230,7 @@ impl std::fmt::Display for MouseState {
     }
 }
 
-fn fmt_mouse(state: MouseState, row: u32, column: u32, shift: bool, alt: bool, ctrl: bool, button: MouseButton, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+fn fmt_mouse(state: MouseState, row: i32, column: i32, shift: bool, alt: bool, ctrl: bool, button: MouseButton, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     fmt_modifiers(shift, alt, ctrl, f)?;
 
     if button == MouseButton::None {
@@ -201,7 +242,7 @@ fn fmt_mouse(state: MouseState, row: u32, column: u32, shift: bool, alt: bool, c
     write!(f, " {column}x{row}")
 }
 
-fn fmt_wheel(state: MouseState, row: u32, column: u32, shift: bool, alt: bool, ctrl: bool, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+fn fmt_wheel(state: MouseState, row: i32, column: i32, shift: bool, alt: bool, ctrl: bool, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     fmt_modifiers(shift, alt, ctrl, f)?;
 
     write!(f, "Wheel {state} {column}x{row}")

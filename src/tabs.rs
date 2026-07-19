@@ -1,4 +1,4 @@
-use crate::{event::{Event, Key}, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::{Rect, Widget}};
+use crate::{event::{Event, Key}, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::Widget};
 
 #[derive(Debug)]
 pub struct Tab {
@@ -75,9 +75,9 @@ impl Widget for Tabs {
         }
     }
 
-    fn draw(&self, termio: &mut TermIO, global_row: i32, global_column: i32) -> std::io::Result<()> {
-        let row = self.draw_rect.row + global_row;
-        let column = self.draw_rect.column + global_column;
+    fn draw(&self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
+        let row = self.draw_rect.row + parent_row;
+        let column = self.draw_rect.column + parent_column;
 
         // TODO: cropping
         let mut tab_column = column;
@@ -95,33 +95,31 @@ impl Widget for Tabs {
 
         if self.selected_tab_index < self.tabs.len() {
             let child = &self.tabs[self.selected_tab_index].content;
-            child.draw(termio, global_row + 1, global_column)?;
+            child.draw(termio, parent_row + 1, parent_column)?;
         }
 
         Ok(())
     }
 
     fn handle_event(&mut self, event: &Event) {
-        match event {
-            Event::KeyPress { key: Key::Char(ch), ctrl: false, alt: true, shift: false } => {
-                for (index, tab) in self.tabs.iter_mut().enumerate() {
-                    if tab.menonic.eq_ignore_ascii_case(ch) {
-                        self.selected_tab_index = index;
+        if let Event::KeyPress { key: Key::Char(ch), ctrl: false, alt: true, shift: false } = event {
+            for (index, tab) in self.tabs.iter_mut().enumerate() {
+                if tab.menonic.eq_ignore_ascii_case(ch) {
+                    self.selected_tab_index = index;
 
-                        tab.content.set_draw_rect(&Rect {
-                            row: self.draw_rect.row + 1,
-                            height: if self.draw_rect.height > 0 { self.draw_rect.height - 1 } else { 0 },
-                            ..self.draw_rect
-                        });
-                        break;
-                    }
+                    tab.content.set_draw_rect(&Rect {
+                        row: self.draw_rect.row + 1,
+                        height: if self.draw_rect.height > 0 { self.draw_rect.height - 1 } else { 0 },
+                        ..self.draw_rect
+                    });
+                    return;
                 }
             }
-            _ => {
-                if self.selected_tab_index < self.tabs.len() {
-                    self.tabs[self.selected_tab_index].content.handle_event(event);
-                }
-            }
+        }
+
+        if self.selected_tab_index < self.tabs.len() {
+            let child = &mut self.tabs[self.selected_tab_index].content;
+            event.send_to(child.as_mut());
         }
     }
 }
