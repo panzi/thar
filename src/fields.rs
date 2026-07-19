@@ -1,11 +1,13 @@
-use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schema::{CacheState, Entry}, table::{Align, ColumnDef}};
+use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
 
 use std::fmt::Write;
 
 pub trait Field {
+    type Value;
+
     fn header(&self) -> &str;
     fn align(&self) -> Align;
-    fn write_rich_text(&self, index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result;
+    fn write_rich_text(&self, index: usize, value: &Self::Value, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result;
 
     #[inline]
     fn to_column_def(&self) -> ColumnDef {
@@ -38,6 +40,8 @@ pub enum EntryField {
 }
 
 impl Field for EntryField {
+    type Value = Entry;
+
     #[inline]
     fn header(&self) -> &str {
         match self {
@@ -85,16 +89,22 @@ impl Field for EntryField {
                 rich_text.append_plain_text(buf);
             }
             Self::Request(req) => {
-                req.write_rich_text(index, entry, rich_text, buf)?;
+                req.write_rich_text(0, &entry.request, rich_text, buf)?;
             }
             Self::Response(res) => {
-                res.write_rich_text(index, entry, rich_text, buf)?;
+                if let Some(response) = &entry.response {
+                    res.write_rich_text(0, response, rich_text, buf)?;
+                }
             }
             Self::Cache(cache) => {
-                cache.write_rich_text(index, entry, rich_text, buf)?;
+                if let Some(value) = &entry.cache {
+                    cache.write_rich_text(0, value, rich_text, buf)?;
+                }
             }
             Self::Timings(timings) => {
-                timings.write_rich_text(index, entry, rich_text, buf)?;
+                if let Some(value) = &entry.timings {
+                    timings.write_rich_text(0, value, rich_text, buf)?;
+                }
             }
             Self::ServerIpAddress => {
                 if let Some(server_ip_address) = &entry.server_ip_address {
@@ -153,6 +163,8 @@ pub fn get_method_color(method: &str) -> Color {
 }
 
 impl Field for RequestField {
+    type Value = Request;
+
     #[inline]
     fn header(&self) -> &str {
         match self {
@@ -191,61 +203,61 @@ impl Field for RequestField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, _index: usize, request: &Request, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Method => {
-                let style = RichTextStyle::build().foreground(get_method_color(&entry.request.method)).into_inner();
-                rich_text.append_text(&style, &entry.request.method);
+                let style = RichTextStyle::build().foreground(get_method_color(&request.method)).into_inner();
+                rich_text.append_text(&style, &request.method);
             },
             Self::Url => {
-                write!(buf, "{}", entry.request.url)?;
+                write!(buf, "{}", request.url)?;
                 rich_text.append_plain_text(buf);
             },
             Self::Scheme => {
-                rich_text.append_plain_text(entry.request.url.scheme());
+                rich_text.append_plain_text(request.url.scheme());
             },
             Self::Host => {
-                if let Some(host) = entry.request.url.host_str() {
+                if let Some(host) = request.url.host_str() {
                     rich_text.append_plain_text(host);
                 }
             },
             Self::Port => {
-                if let Some(port) = entry.request.url.port() {
+                if let Some(port) = request.url.port() {
                     write!(buf, "{}", port)?;
                     rich_text.append_plain_text(buf);
                 }
             },
             Self::Domain => {
-                if let Some(domain) = entry.request.url.domain() {
+                if let Some(domain) = request.url.domain() {
                     rich_text.append_plain_text(domain);
                 }
             },
             Self::Path => {
-                rich_text.append_plain_text(entry.request.url.path());
+                rich_text.append_plain_text(request.url.path());
             },
             Self::Query => {
-                if let Some(query) = entry.request.url.query() {
+                if let Some(query) = request.url.query() {
                     rich_text.append_plain_text(query);
                 }
             },
             Self::Fragment => {
-                if let Some(fragment) = entry.request.url.fragment() {
+                if let Some(fragment) = request.url.fragment() {
                     rich_text.append_plain_text(fragment);
                 }
             },
             Self::HttpVersion => {
-                rich_text.append_plain_text(&entry.request.http_version);
+                rich_text.append_plain_text(&request.http_version);
             },
             Self::HeadersSize => {
-                write!(buf, "{}", entry.request.headers_size)?;
+                write!(buf, "{}", request.headers_size)?;
                 rich_text.append_plain_text(buf);
             },
             Self::BodySize => {
-                write!(buf, "{}", entry.request.body_size)?;
+                write!(buf, "{}", request.body_size)?;
                 rich_text.append_plain_text(buf);
             },
             Self::Comment => {
-                if let Some(comment) = &entry.comment {
+                if let Some(comment) = &request.comment {
                     rich_text.append_plain_text(comment);
                 }
             },
@@ -285,6 +297,8 @@ fn get_staus_color(status: u32) -> Color {
 }
 
 impl Field for ResponseField {
+    type Value = Response;
+
     #[inline]
     fn header(&self) -> &str {
         match self {
@@ -311,11 +325,7 @@ impl Field for ResponseField {
         }
     }
 
-    fn write_rich_text(&self, index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
-        let Some(response) = &entry.response else {
-            return Ok(())
-        };
-
+    fn write_rich_text(&self, _index: usize, response: &Response, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Status => {
                 let style = RichTextStyle::build().foreground(get_staus_color(response.status)).into();
@@ -333,7 +343,9 @@ impl Field for ResponseField {
                 }
             },
             Self::Content(content) => {
-                content.write_rich_text(index, entry, rich_text, buf)?;
+                if let Some(value) = &response.content {
+                    content.write_rich_text(0, value, rich_text, buf)?;
+                }
             },
             Self::HeadersSize => {
                 write!(buf, "{}", response.headers_size)?;
@@ -364,6 +376,8 @@ pub enum ContentField {
 }
 
 impl Field for ContentField {
+    type Value = Content;
+
     #[inline]
     fn header(&self) -> &str {
         match self {
@@ -386,15 +400,7 @@ impl Field for ContentField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
-        let Some(response) = &entry.response else {
-            return Ok(());
-        };
-
-        let Some(content) = &response.content else {
-            return Ok(());
-        };
-
+    fn write_rich_text(&self, _index: usize, content: &Content, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Size => {
                 write!(buf, "{}", content.size)?;
@@ -435,6 +441,8 @@ pub enum CacheField {
 }
 
 impl Field for CacheField {
+    type Value = Cache;
+
     #[inline]
     fn header(&self) -> &str {
         match self {
@@ -463,11 +471,7 @@ impl Field for CacheField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
-        let Some(cache) = &entry.cache else {
-            return Ok(());
-        };
-
+    fn write_rich_text(&self, _index: usize, cache: &Cache, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::BeforeRequest(state_field) => {
                 if let Some(Some(state)) = &cache.before_request {
@@ -567,6 +571,8 @@ pub enum TimingsField {
 }
 
 impl Field for TimingsField {
+    type Value = Timings;
+
     #[inline]
     fn header(&self) -> &str {
         match self {
@@ -595,11 +601,7 @@ impl Field for TimingsField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
-        let Some(timings) = &entry.timings else {
-            return Ok(());
-        };
-
+    fn write_rich_text(&self, _index: usize, timings: &Timings, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Blocked => {
                 write!(buf, "{}", timings.blocked)?;
@@ -633,6 +635,127 @@ impl Field for TimingsField {
             Self::Comment => {
                 if let Some(comment) = &timings.comment {
                     rich_text.append_plain_text(comment);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageField {
+    Index,
+    StartedDateTime,
+    Id,
+    Title,
+    Comment,
+}
+
+impl Field for PageField {
+    type Value = Page;
+
+    #[inline]
+    fn header(&self) -> &str {
+        match self {
+            Self::Index           => "Index",
+            Self::StartedDateTime => "Started At",
+            Self::Id              => "Id",
+            Self::Title           => "Title",
+            Self::Comment         => "Comment",
+        }
+    }
+
+    #[inline]
+    fn align(&self) -> Align {
+        match self {
+            Self::Index           => Align::Right,
+            Self::StartedDateTime => Align::Left,
+            Self::Id              => Align::Left,
+            Self::Title           => Align::Left,
+            Self::Comment         => Align::Left,
+        }
+    }
+
+    fn write_rich_text(&self, index: usize, page: &Page, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+        match self {
+            Self::Index => {
+                write!(buf, "{index}")?;
+                rich_text.append_plain_text(buf);
+            }
+            Self::StartedDateTime => {
+                write!(buf, "{}", page.started_date_time)?;
+                rich_text.append_plain_text(buf);
+            }
+            Self::Id => {
+                rich_text.append_plain_text(&page.id);
+            }
+            Self::Title => {
+                rich_text.append_plain_text(&page.title);
+            }
+            Self::Comment => {
+                if let Some(connection) = &page.comment {
+                    rich_text.append_plain_text(connection);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageTimingField {
+    Index,
+    OnContentLoad,
+    OnLoad,
+    Comment,
+}
+
+impl Field for PageTimingField {
+    type Value = PageTiming;
+
+    #[inline]
+    fn header(&self) -> &str {
+        match self {
+            Self::Index         => "Index",
+            Self::OnContentLoad => "On Content Load",
+            Self::OnLoad        => "On Load",
+            Self::Comment       => "Comment",
+        }
+    }
+
+    #[inline]
+    fn align(&self) -> Align {
+        match self {
+            Self::Index         => Align::Right,
+            Self::OnContentLoad => Align::Left,
+            Self::OnLoad        => Align::Left,
+            Self::Comment       => Align::Left,
+        }
+    }
+
+    fn write_rich_text(&self, index: usize, timing: &PageTiming, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+        match self {
+            Self::Index => {
+                write!(buf, "{index}")?;
+                rich_text.append_plain_text(buf);
+            }
+            Self::OnContentLoad => {
+                if let Some(value) = &timing.on_content_load {
+                    write!(buf, "{value}")?;
+                    rich_text.append_plain_text(buf);
+                }
+            }
+            Self::OnLoad => {
+                if let Some(value) = &timing.on_load {
+                    write!(buf, "{value}")?;
+                    rich_text.append_plain_text(buf);
+                }
+            }
+            Self::Comment => {
+                if let Some(connection) = &timing.comment {
+                    rich_text.append_plain_text(connection);
                 }
             }
         }

@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, RequestField, ResponseField}, rich_text::{RichText, RichTextStyle}, schema::HAR, table::Table, termio::TermIO, widget::{Rect, Widget}};
+use crate::{color::{Color, Color16}, event::{Event, Key}, fields::{ContentField, EntryField, Field, PageField, RequestField, ResponseField}, rich_text::{RichText, RichTextStyle}, schema::HAR, table::Table, termio::TermIO, widget::{Rect, Widget}};
 
 use clap::Parser;
 
@@ -180,46 +180,80 @@ A last line.";
     view_state.requests_label.append_rich_text("[bg=black][color=white][u]R[/u]equests[/color][/bg]").unwrap();
     view_state.pages_label.append_rich_text("[bg=black][color=white][u]P[/u]ages[/color][/bg]").unwrap();
 
-    let entry_columns = [
-        EntryField::Index,
-        EntryField::Request(RequestField::Method),
-        EntryField::Request(RequestField::Url),
-        EntryField::Response(ResponseField::Status),
-        EntryField::Response(ResponseField::StatusText),
-        EntryField::Response(ResponseField::Content(ContentField::MimeType)),
-        EntryField::Response(ResponseField::HeadersSize),
-        EntryField::Response(ResponseField::BodySize),
-        EntryField::StartedDateTime,
-        EntryField::Time,
-    ];
-
-    view_state.entries_table.set_columns(entry_columns.map(Into::into));
-
-    let mut buf = String::new();
-    for (index, entry) in har.log.entries.iter().enumerate() {
-        let mut row = Vec::new();
-        for column in &entry_columns {
-            buf.clear();
-
-            let mut cell = RichText::new();
-            column.write_rich_text(index, entry, &mut cell, &mut buf).unwrap();
-
-            row.push(cell);
-        }
-        view_state.entries_table.rows_mut().push(row);
-    }
-
     {
         let window_size = termio.window_size();
+
+        // format entries table
+        let entry_columns = [
+            EntryField::Index,
+            EntryField::Request(RequestField::Method),
+            EntryField::Request(RequestField::Url),
+            EntryField::Response(ResponseField::Status),
+            EntryField::Response(ResponseField::StatusText),
+            EntryField::Response(ResponseField::Content(ContentField::MimeType)),
+            EntryField::Response(ResponseField::HeadersSize),
+            EntryField::Response(ResponseField::BodySize),
+            EntryField::StartedDateTime,
+            EntryField::Time,
+        ];
+
+        view_state.entries_table.set_columns(entry_columns.map(Into::into));
+
+        let mut buf = String::new();
+        for (index, entry) in har.log.entries.iter().enumerate() {
+            let mut row = Vec::new();
+            for column in &entry_columns {
+                buf.clear();
+
+                let mut cell = RichText::new();
+                column.write_rich_text(index, entry, &mut cell, &mut buf).unwrap();
+
+                row.push(cell);
+            }
+            view_state.entries_table.rows_mut().push(row);
+        }
+
         view_state.entries_table.set_draw_rect(&Rect {
             row: 1,
             column: 0,
             width: window_size.columns,
             height: if window_size.rows > 0 { window_size.rows - 1 } else { 0 },
         });
-    }
 
-    view_state.entries_table.update();
+        view_state.entries_table.update();
+
+        // format pages table
+        let page_columns = [
+            PageField::Index,
+            PageField::Id,
+            PageField::StartedDateTime,
+            PageField::Title,
+        ];
+
+        view_state.pages_table.set_columns(page_columns.map(Into::into));
+
+        for (index, page) in har.log.pages.iter().enumerate() {
+            let mut row = Vec::new();
+            for column in &page_columns {
+                buf.clear();;
+
+                let mut cell = RichText::new();
+                column.write_rich_text(index, page, &mut cell, &mut buf).unwrap();
+
+                row.push(cell);
+            }
+            view_state.pages_table.rows_mut().push(row);
+        }
+
+        view_state.pages_table.set_draw_rect(&Rect {
+            row: 1,
+            column: 0,
+            width: window_size.columns,
+            height: if window_size.rows > 0 { window_size.rows - 1 } else { 0 },
+        });
+
+        view_state.pages_table.update();
+    }
 
     full_redraw(&mut termio, &view_state)?;
 

@@ -13,7 +13,8 @@ pub struct Log {
     pub version: Option<String>,
     pub creator: Option<AppInfo>,
     pub browser: Option<AppInfo>,
-    pub pages: Option<Vec<Page>>,
+    #[serde(default)]
+    pub pages: Vec<Page>,
     pub entries: Vec<Entry>,
     pub comment: Option<String>,
 }
