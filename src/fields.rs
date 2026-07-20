@@ -575,6 +575,7 @@ pub enum ContentField {
     Compression,
     MimeType,
     Text,
+    Encoding,
     Comment,
 }
 
@@ -585,6 +586,7 @@ impl std::fmt::Display for ContentField {
             Self::Compression => "compression".fmt(f),
             Self::MimeType    => "mimeType".fmt(f),
             Self::Text        => "text".fmt(f),
+            Self::Encoding    => "encoding".fmt(f),
             Self::Comment     => "comment".fmt(f),
         }
     }
@@ -609,6 +611,7 @@ impl Field for ContentField {
             Self::Compression => "Compression",
             Self::MimeType    => "Mime Type",
             Self::Text        => "Content Text",
+            Self::Encoding    => "Encoding",
             Self::Comment     => "Content Comment",
         }
     }
@@ -620,6 +623,7 @@ impl Field for ContentField {
             Self::Compression => Align::Right,
             Self::MimeType    => Align::Left,
             Self::Text        => Align::Left,
+            Self::Encoding    => Align::Left,
             Self::Comment     => Align::Left,
         }
     }
@@ -659,6 +663,11 @@ impl Field for ContentField {
                     }
                 }
             }
+            Self::Encoding => {
+                if let Some(encoding) = &content.encoding {
+                    rich_text.append_plain_text(encoding);
+                }
+            }
             Self::Comment => {
                 if let Some(comment) = &content.comment {
                     rich_text.append_plain_text(comment);
@@ -678,6 +687,8 @@ impl Field for ContentField {
             Ok(Self::MimeType)
         } else if field.eq_ignore_ascii_case("text") {
             Ok(Self::Text)
+        } else if field.eq_ignore_ascii_case("encoding") {
+            Ok(Self::Encoding)
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
         } else {
