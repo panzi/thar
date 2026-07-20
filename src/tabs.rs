@@ -1,18 +1,17 @@
-use crate::{color::{Color, Color16}, event::{Event, Key}, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::Widget};
+use crate::{color::{Color, Color16}, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::{Widget, WidgetId, next_widget_id}};
 
 #[derive(Debug)]
 pub struct Tab {
     pub title: String,
     pub mnemonic: char,
-    pub content: Box<dyn TabContent>,
+    pub content: Box<dyn Widget>,
 }
 
-pub trait TabContent: Widget + std::fmt::Debug {}
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Tabs {
     tabs: Vec<Tab>,
     formatted_tabs: Vec<RichText>,
+    widget_id: WidgetId,
     draw_rect: Rect,
     selected_tab_index: usize,
 }
@@ -23,6 +22,7 @@ impl Tabs {
         let mut tabs = Self {
             tabs: tabs.into(),
             formatted_tabs: Vec::new(),
+            widget_id: next_widget_id(),
             draw_rect: Rect::default(),
             selected_tab_index: 0,
         };
@@ -66,9 +66,33 @@ impl Tabs {
     pub fn selected_tab_index(&self) -> usize {
         self.selected_tab_index
     }
+
+    #[inline]
+    pub fn selected_tab_id(&self) -> Option<WidgetId> {
+        self.tabs.get(self.selected_tab_index).map(|tab| tab.content.widget_id())
+    }
+
+    #[inline]
+    pub fn set_selected_tab_index(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.selected_tab_index = index;
+        }
+    }
+
+    #[inline]
+    pub fn set_selected_tab_id(&mut self, widget_id: WidgetId) {
+        if let Some(index) = self.tabs.iter().position(|tab| tab.content.widget_id() == widget_id) {
+            self.selected_tab_index = index;
+        }
+    }
 }
 
 impl Widget for Tabs {
+    #[inline]
+    fn widget_id(&self) -> WidgetId {
+        self.widget_id
+    }
+
     #[inline]
     fn draw_rect(&self) -> Rect {
         self.draw_rect
@@ -115,7 +139,7 @@ impl Widget for Tabs {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Event) {
+    fn handle_event(&mut self, event: &Event, broker: &mut MessageBroker) {
         if let Event::KeyPress { key: Key::Char(ch), ctrl: false, alt: true, shift: false } = event {
             for (index, tab) in self.tabs.iter_mut().enumerate() {
                 if tab.mnemonic.eq_ignore_ascii_case(ch) {
@@ -132,7 +156,13 @@ impl Widget for Tabs {
         }
 
         if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
-            event.send_to(tab.content.as_mut());
+            event.send_to(tab.content.as_mut(), broker);
+        }
+    }
+
+    fn handle_message(&mut self, message: &mut crate::message::Message, broker: &mut MessageBroker) {
+        for tab in &mut self.tabs {
+            tab.content.handle_message(message, broker);
         }
     }
 }

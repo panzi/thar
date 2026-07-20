@@ -1,0 +1,22 @@
+// only used for debugging in examples
+
+pub mod schema;
+pub mod termio;
+pub mod event;
+pub mod epoll;
+pub mod borrowed_fd;
+pub mod color;
+pub mod char_width;
+pub mod style;
+pub mod rich_text;
+pub mod fields;
+pub mod table;
+pub mod widget;
+pub mod tabs;
+pub mod rect;
+pub mod point;
+pub mod message;
+pub mod app;
+pub mod request_view;
+pub mod page_view;
+pub mod property_list;

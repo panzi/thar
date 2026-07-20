@@ -1,22 +1,21 @@
-use crate::{color::{Color, Color16}, event::{Event, Key}, rect::Rect, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, tabs::TabContent, termio::TermIO, widget::Widget};
+use crate::{color::{Color, Color16}, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{Widget, WidgetId, next_widget_id}};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
     columns: Vec<Column>,
     header: Vec<RichText>,
     rows: Vec<Vec<RichText>>,
     formatted_header: RichText,
     formatted_rows: Vec<RichText>,
+    draw_rect: Rect,
+    widget_id: WidgetId,
     width: usize,
     header_height: usize,
     rows_height: usize,
+    selected_row_index: usize,
     scroll_row: u32,
     scroll_column: u32,
-    selected_row_index: usize,
-    draw_rect: Rect,
 }
-
-impl TabContent for Table {}
 
 fn gather_widths(columns: &mut Vec<Column>, row: &[RichText]) {
     if row.len() > columns.len() {
@@ -82,9 +81,35 @@ fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText) ->
     height
 }
 
+impl Default for Table {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Table {
     #[inline]
-    pub fn new(header: impl Into<Vec<RichText>>, rows: impl Into<Vec<Vec<RichText>>>, align: &[Align]) -> Self {
+    pub fn new() -> Self {
+        Self {
+            columns: Vec::new(),
+            header: Vec::new(),
+            rows: Vec::new(),
+            formatted_header: RichText::new(),
+            formatted_rows: Vec::new(),
+            draw_rect: Rect::default(),
+            widget_id: next_widget_id(),
+            width: 0,
+            header_height: 0,
+            rows_height: 0,
+            selected_row_index: 0,
+            scroll_row: 0,
+            scroll_column: 0,
+        }
+    }
+
+    #[inline]
+    pub fn with_data(header: impl Into<Vec<RichText>>, rows: impl Into<Vec<Vec<RichText>>>, align: &[Align]) -> Self {
         let mut table = Self {
             columns: align.iter().cloned().map(Column::new).collect(),
             header: header.into(),
@@ -97,6 +122,7 @@ impl Table {
             scroll_row: 0,
             scroll_column: 0,
             selected_row_index: 0,
+            widget_id: next_widget_id(),
             draw_rect: Rect::default(),
         };
 
@@ -143,16 +169,20 @@ impl Table {
     #[inline]
     pub fn set_scroll_row(&mut self, scroll_row: u32) {
         self.scroll_row = scroll_row;
+        self.clamp_scroll();
     }
 
     #[inline]
     pub fn set_scroll_column(&mut self, scroll_column: u32) {
         self.scroll_column = scroll_column;
+        self.clamp_scroll();
     }
 
     #[inline]
     pub fn set_selected_row_index(&mut self, selected_row_index: usize) {
-        self.selected_row_index = selected_row_index;
+        if selected_row_index < self.rows.len() {
+            self.selected_row_index = selected_row_index;
+        }
     }
 
     pub fn set_columns(&mut self, column_defs: impl IntoIterator<Item = ColumnDef>) {
@@ -307,6 +337,11 @@ impl Table {
 
 impl Widget for Table {
     #[inline]
+    fn widget_id(&self) -> WidgetId {
+        self.widget_id
+    }
+
+    #[inline]
     fn draw_rect(&self) -> Rect {
         self.draw_rect
     }
@@ -407,10 +442,16 @@ impl Widget for Table {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Event) {
+    fn handle_event(&mut self, event: &Event, broker: &mut MessageBroker) {
         match event {
             Event::KeyPress { key: Key::Enter, alt: false, ctrl: false, shift: false } => {
                 // TODO: somehow singal to open the selected record
+                if self.selected_row_index < self.rows.len() {
+                    broker.dispatch(SelectTableRow {
+                        widget_id: self.widget_id,
+                        row_index: self.selected_row_index,
+                    });
+                }
             }
             Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
                 if self.selected_row_index > 0 {
@@ -544,6 +585,12 @@ impl Widget for Table {
             _ => {}
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectTableRow {
+    pub widget_id: WidgetId,
+    pub row_index: usize,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
