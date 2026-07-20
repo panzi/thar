@@ -2,7 +2,7 @@ use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schem
 
 use std::fmt::Write;
 
-pub trait Field {
+pub trait Field: Sized + std::fmt::Display {
     type Value;
 
     fn header(&self) -> &str;
@@ -16,12 +16,39 @@ pub trait Field {
             align: self.align(),
         }
     }
+
+    fn parse(field: &str) -> Result<Self, ParserError>;
 }
 
 impl<F> From<F> for ColumnDef where F: Field {
     #[inline]
     fn from(value: F) -> Self {
         value.to_column_def()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParserError {
+    index: usize,
+}
+
+impl ParserError {
+    #[inline]
+    pub fn new(index: usize) -> Self {
+        Self { index }
+    }
+
+    #[inline]
+    pub fn index(&self) -> usize {
+        self.index
+    }
+}
+
+impl std::error::Error for ParserError {}
+
+impl std::fmt::Display for ParserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error parsing field at index {}", self.index)
     }
 }
 
@@ -37,6 +64,23 @@ pub enum EntryField {
     ServerIpAddress,
     Connection,
     Comment,
+}
+
+impl std::fmt::Display for EntryField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Index            => "index".fmt(f),
+            Self::StartedDateTime  => "startedDateTime".fmt(f),
+            Self::Time             => "time".fmt(f),
+            Self::Request(req)     => write!(f, "request.{req}"),
+            Self::Response(res)    => write!(f, "result.{res}"),
+            Self::Cache(cache)     => write!(f, "cache.{cache}"),
+            Self::Timings(timings) => write!(f, "timings.{timings}"),
+            Self::ServerIpAddress  => "serverIPAddress".fmt(f),
+            Self::Connection       => "connection".fmt(f),
+            Self::Comment          => "comment".fmt(f),
+        }
+    }
 }
 
 impl Field for EntryField {
@@ -125,6 +169,45 @@ impl Field for EntryField {
 
         Ok(())
     }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        if let Some((head, tail)) = field.split_once('.') {
+            let map_err = |err: ParserError| ParserError::new(head.len() + 1 + err.index());
+            if head.eq_ignore_ascii_case("request") {
+                Ok(EntryField::Request(
+                    RequestField::parse(tail).map_err(map_err)?
+                ))
+            } else if head.eq_ignore_ascii_case("response") {
+                Ok(EntryField::Response(
+                    ResponseField::parse(tail).map_err(map_err)?
+                ))
+            } else if head.eq_ignore_ascii_case("cache") {
+                Ok(EntryField::Cache(
+                    CacheField::parse(tail).map_err(map_err)?
+                ))
+            } else if head.eq_ignore_ascii_case("timings") {
+                Ok(EntryField::Timings(
+                    TimingsField::parse(tail).map_err(map_err)?
+                ))
+            } else {
+                Err(ParserError::new(0))
+            }
+        } else if field.eq_ignore_ascii_case("index") {
+            Ok(EntryField::Index)
+        } else if field.eq_ignore_ascii_case("startedDateTime") {
+            Ok(EntryField::StartedDateTime)
+        } else if field.eq_ignore_ascii_case("time") {
+            Ok(EntryField::Time)
+        } else if field.eq_ignore_ascii_case("serverIpAddress") {
+            Ok(EntryField::ServerIpAddress)
+        } else if field.eq_ignore_ascii_case("connection") {
+            Ok(EntryField::Connection)
+        } else if field.eq_ignore_ascii_case("comment") {
+            Ok(EntryField::Comment)
+        } else {
+            Err(ParserError::new(0))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +225,26 @@ pub enum RequestField {
     HeadersSize,
     BodySize,
     Comment,
+}
+
+impl std::fmt::Display for RequestField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Method      => "method".fmt(f),
+            Self::Url         => "url".fmt(f),
+            Self::Scheme      => "scheme".fmt(f),
+            Self::Host        => "host".fmt(f),
+            Self::Port        => "port".fmt(f),
+            Self::Domain      => "domain".fmt(f),
+            Self::Path        => "path".fmt(f),
+            Self::Query       => "query".fmt(f),
+            Self::Fragment    => "fragment".fmt(f),
+            Self::HttpVersion => "httpVersion".fmt(f),
+            Self::HeadersSize => "header ize".fmt(f),
+            Self::BodySize    => "bodySize".fmt(f),
+            Self::Comment     => "comment".fmt(f),
+        }
+    }
 }
 
 pub fn get_method_color(method: &str) -> Color {
@@ -265,6 +368,10 @@ impl Field for RequestField {
 
         Ok(())
     }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,6 +400,20 @@ fn get_staus_color(status: u32) -> Color {
         Color::Color16(Color16::Red)
     } else {
         Color::Color16(Color16::Magenta)
+    }
+}
+
+impl std::fmt::Display for ResponseField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Status           => "status".fmt(f),
+            Self::StatusText       => "statusText".fmt(f),
+            Self::RedirectUrl      => "redirectURL".fmt(f),
+            Self::Content(content) => write!(f, "content.{content}"),
+            Self::HeadersSize      => "headerSize".fmt(f),
+            Self::BodySize         => "bodySize".fmt(f),
+            Self::Comment          => "comment".fmt(f),
+        }
     }
 }
 
@@ -364,6 +485,10 @@ impl Field for ResponseField {
 
         Ok(())
     }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,6 +498,18 @@ pub enum ContentField {
     MimeType,
     Text,
     Comment,
+}
+
+impl std::fmt::Display for ContentField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Size        => "size".fmt(f),
+            Self::Compression => "compression".fmt(f),
+            Self::MimeType    => "mimeType".fmt(f),
+            Self::Text        => "text".fmt(f),
+            Self::Comment     => "comment".fmt(f),
+        }
+    }
 }
 
 impl Field for ContentField {
@@ -431,6 +568,10 @@ impl Field for ContentField {
 
         Ok(())
     }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -438,6 +579,16 @@ pub enum CacheField {
     BeforeRequest(CacheStateField),
     AfterRequest(CacheStateField),
     Comment,
+}
+
+impl std::fmt::Display for CacheField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BeforeRequest(value) => write!(f, "beforeRequest.{value}"),
+            Self::AfterRequest(value)  => write!(f, "afterRequest.{value}"),
+            Self::Comment              => "comment".fmt(f),
+        }
+    }
 }
 
 impl Field for CacheField {
@@ -492,6 +643,10 @@ impl Field for CacheField {
 
         Ok(())
     }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -501,6 +656,18 @@ pub enum CacheStateField {
     ETag,
     HitCount,
     Comment,
+}
+
+impl std::fmt::Display for CacheStateField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Expires    => "expires".fmt(f),
+            Self::LastAccess => "lastAccess".fmt(f),
+            Self::ETag       => "etag".fmt(f),
+            Self::HitCount   => "hitCount".fmt(f),
+            Self::Comment    => "comment".fmt(f),
+        }
+    }
 }
 
 impl CacheStateField {
@@ -568,6 +735,21 @@ pub enum TimingsField {
     Receive,
     SSL,
     Comment,
+}
+
+impl std::fmt::Display for TimingsField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Blocked => "blocked".fmt(f),
+            Self::DNS     => "dns".fmt(f),
+            Self::Connect => "connect".fmt(f),
+            Self::Send    => "send".fmt(f),
+            Self::Wait    => "wait".fmt(f),
+            Self::Receive => "receive".fmt(f),
+            Self::SSL     => "ssl".fmt(f),
+            Self::Comment => "comment".fmt(f),
+        }
+    }
 }
 
 impl Field for TimingsField {
@@ -641,6 +823,10 @@ impl Field for TimingsField {
 
         Ok(())
     }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -650,6 +836,18 @@ pub enum PageField {
     Id,
     Title,
     Comment,
+}
+
+impl std::fmt::Display for PageField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Index           => "index".fmt(f),
+            Self::StartedDateTime => "startedDateTime".fmt(f),
+            Self::Id              => "id".fmt(f),
+            Self::Title           => "title".fmt(f),
+            Self::Comment         => "comment".fmt(f),
+        }
+    }
 }
 
 impl Field for PageField {
@@ -702,6 +900,10 @@ impl Field for PageField {
 
         Ok(())
     }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -710,6 +912,17 @@ pub enum PageTimingField {
     OnContentLoad,
     OnLoad,
     Comment,
+}
+
+impl std::fmt::Display for PageTimingField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Index         => "index".fmt(f),
+            Self::OnContentLoad => "onContentLoad".fmt(f),
+            Self::OnLoad        => "onLoad".fmt(f),
+            Self::Comment       => "comment".fmt(f),
+        }
+    }
 }
 
 impl Field for PageTimingField {
@@ -761,5 +974,9 @@ impl Field for PageTimingField {
         }
 
         Ok(())
+    }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        unimplemented!()
     }
 }
