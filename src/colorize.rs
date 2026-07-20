@@ -85,6 +85,7 @@ fn colorize_string(text: &str, mut index: usize, rich_text: &mut RichText) -> us
                         rich_text.append_text(&ESCAPE_STYLE, &text[prev..index]);
                     }
                     'u' => {
+                        index += 1;
                         let mut count = 0;
                         while count < 4 && index < text.len() && text[index..].starts_with(|ch: char| ch.is_ascii_hexdigit()) {
                             index += 1;
