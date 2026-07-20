@@ -1,6 +1,6 @@
 use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
 
-use std::fmt::Write;
+use std::{fmt::Write, str::FromStr};
 
 pub trait Field: Sized + std::fmt::Display {
     type Value;
@@ -80,6 +80,15 @@ impl std::fmt::Display for EntryField {
             Self::Connection       => "connection".fmt(f),
             Self::Comment          => "comment".fmt(f),
         }
+    }
+}
+
+impl FromStr for EntryField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -265,6 +274,15 @@ pub fn get_method_color(method: &str) -> Color {
     }
 }
 
+impl FromStr for RequestField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
 impl Field for RequestField {
     type Value = Request;
 
@@ -281,7 +299,7 @@ impl Field for RequestField {
             Self::Query       => "Query",
             Self::Fragment    => "Fragment",
             Self::HttpVersion => "HTTP Version",
-            Self::HeadersSize => "Request Header Size",
+            Self::HeadersSize => "Request Headers Size",
             Self::BodySize    => "Request Body Size",
             Self::Comment     => "Request Comment",
         }
@@ -370,7 +388,35 @@ impl Field for RequestField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        unimplemented!()
+        if field.eq_ignore_ascii_case("method") {
+            Ok(Self::Method)
+        } else if field.eq_ignore_ascii_case("url") {
+            Ok(Self::Url)
+        } else if field.eq_ignore_ascii_case("scheme") {
+            Ok(Self::Scheme)
+        } else if field.eq_ignore_ascii_case("host") {
+            Ok(Self::Host)
+        } else if field.eq_ignore_ascii_case("port") {
+            Ok(Self::Port)
+        } else if field.eq_ignore_ascii_case("domain") {
+            Ok(Self::Domain)
+        } else if field.eq_ignore_ascii_case("path") {
+            Ok(Self::Path)
+        } else if field.eq_ignore_ascii_case("query") {
+            Ok(Self::Query)
+        } else if field.eq_ignore_ascii_case("fragment") {
+            Ok(Self::Fragment)
+        } else if field.eq_ignore_ascii_case("httpVersion") {
+            Ok(Self::HttpVersion)
+        } else if field.eq_ignore_ascii_case("headersSize") {
+            Ok(Self::HeadersSize)
+        } else if field.eq_ignore_ascii_case("bodySize") {
+            Ok(Self::BodySize)
+        } else if field.eq_ignore_ascii_case("comment") {
+            Ok(Self::Comment)
+        } else {
+            Err(ParserError::new(0))
+        }
     }
 }
 
@@ -417,6 +463,15 @@ impl std::fmt::Display for ResponseField {
     }
 }
 
+impl FromStr for ResponseField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
 impl Field for ResponseField {
     type Value = Response;
 
@@ -427,7 +482,7 @@ impl Field for ResponseField {
             Self::StatusText       => "Status Text",
             Self::RedirectUrl      => "Redirect URL",
             Self::Content(content) => content.header(),
-            Self::HeadersSize      => "Response Header Size",
+            Self::HeadersSize      => "Response Headers Size",
             Self::BodySize         => "Response Body Size",
             Self::Comment          => "Response Comment",
         }
@@ -487,7 +542,30 @@ impl Field for ResponseField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        unimplemented!()
+        if let Some((head, tail)) = field.split_once('.') {
+            let map_err = |err: ParserError| ParserError::new(head.len() + 1 + err.index());
+            if head.eq_ignore_ascii_case("content") {
+                Ok(ResponseField::Content(
+                    ContentField::parse(tail).map_err(map_err)?
+                ))
+            } else {
+                Err(ParserError::new(0))
+            }
+        } else if field.eq_ignore_ascii_case("status") {
+            Ok(Self::Status)
+        } else if field.eq_ignore_ascii_case("statusText") {
+            Ok(Self::StatusText)
+        } else if field.eq_ignore_ascii_case("redirectUrl") {
+            Ok(Self::RedirectUrl)
+        } else if field.eq_ignore_ascii_case("headersSize") {
+            Ok(Self::HeadersSize)
+        } else if field.eq_ignore_ascii_case("bodySize") {
+            Ok(Self::BodySize)
+        } else if field.eq_ignore_ascii_case("comment") {
+            Ok(Self::Comment)
+        } else {
+            Err(ParserError::new(0))
+        }
     }
 }
 
@@ -509,6 +587,15 @@ impl std::fmt::Display for ContentField {
             Self::Text        => "text".fmt(f),
             Self::Comment     => "comment".fmt(f),
         }
+    }
+}
+
+impl FromStr for ContentField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -570,7 +657,19 @@ impl Field for ContentField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        unimplemented!()
+        if field.eq_ignore_ascii_case("size") {
+            Ok(Self::Size)
+        } else if field.eq_ignore_ascii_case("compression") {
+            Ok(Self::Compression)
+        } else if field.eq_ignore_ascii_case("mimeType") {
+            Ok(Self::MimeType)
+        } else if field.eq_ignore_ascii_case("text") {
+            Ok(Self::Text)
+        } else if field.eq_ignore_ascii_case("comment") {
+            Ok(Self::Comment)
+        } else {
+            Err(ParserError::new(0))
+        }
     }
 }
 
@@ -588,6 +687,15 @@ impl std::fmt::Display for CacheField {
             Self::AfterRequest(value)  => write!(f, "afterRequest.{value}"),
             Self::Comment              => "comment".fmt(f),
         }
+    }
+}
+
+impl FromStr for CacheField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -626,12 +734,12 @@ impl Field for CacheField {
         match self {
             Self::BeforeRequest(state_field) => {
                 if let Some(Some(state)) = &cache.before_request {
-                    state_field.write_rich_text(state, rich_text, buf)?;
+                    state_field.write_rich_text(0, state, rich_text, buf)?;
                 }
             },
             Self::AfterRequest(state_field) => {
                 if let Some(Some(state)) = &cache.after_request {
-                    state_field.write_rich_text(state, rich_text, buf)?;
+                    state_field.write_rich_text(0, state, rich_text, buf)?;
                 }
             },
             Self::Comment => {
@@ -645,7 +753,24 @@ impl Field for CacheField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        unimplemented!()
+        if let Some((head, tail)) = field.split_once('.') {
+            let map_err = |err: ParserError| ParserError::new(head.len() + 1 + err.index());
+            if head.eq_ignore_ascii_case("beforeRequest") {
+                Ok(CacheField::BeforeRequest(
+                    CacheStateField::parse(tail).map_err(map_err)?
+                ))
+            } else if head.eq_ignore_ascii_case("afterRequest") {
+                Ok(CacheField::AfterRequest(
+                    CacheStateField::parse(tail).map_err(map_err)?
+                ))
+            } else {
+                Err(ParserError::new(0))
+            }
+        } else if field.eq_ignore_ascii_case("comment") {
+            Ok(Self::Comment)
+        } else {
+            Err(ParserError::new(0))
+        }
     }
 }
 
@@ -670,8 +795,19 @@ impl std::fmt::Display for CacheStateField {
     }
 }
 
-impl CacheStateField {
-    pub fn write_rich_text(&self, state: &CacheState, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+impl FromStr for CacheStateField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl Field for CacheStateField {
+    type Value = CacheState;
+
+    fn write_rich_text(&self, _index: usize, state: &CacheState, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Expires => {
                 if let Some(expires) = &state.expires {
@@ -703,7 +839,7 @@ impl CacheStateField {
     }
 
     #[inline]
-    pub fn header(&self) -> &str {
+    fn header(&self) -> &str {
         match self {
             Self::Expires    => "Expires",
             Self::LastAccess => "Last Access",
@@ -714,13 +850,29 @@ impl CacheStateField {
     }
 
     #[inline]
-    pub fn align(&self) -> Align {
+    fn align(&self) -> Align {
         match self {
             Self::Expires    => Align::Right,
             Self::LastAccess => Align::Right,
             Self::ETag       => Align::Left,
             Self::HitCount   => Align::Right,
             Self::Comment    => Align::Left,
+        }
+    }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        if field.eq_ignore_ascii_case("expires") {
+            Ok(Self::Expires)
+        } else if field.eq_ignore_ascii_case("lastAccess") {
+            Ok(Self::LastAccess)
+        } else if field.eq_ignore_ascii_case("eTag") {
+            Ok(Self::ETag)
+        } else if field.eq_ignore_ascii_case("hitCount") {
+            Ok(Self::HitCount)
+        } else if field.eq_ignore_ascii_case("comment") {
+            Ok(Self::Comment)
+        } else {
+            Err(ParserError::new(0))
         }
     }
 }
@@ -749,6 +901,15 @@ impl std::fmt::Display for TimingsField {
             Self::SSL     => "ssl".fmt(f),
             Self::Comment => "comment".fmt(f),
         }
+    }
+}
+
+impl FromStr for TimingsField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -825,7 +986,25 @@ impl Field for TimingsField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        unimplemented!()
+        if field.eq_ignore_ascii_case("blocked") {
+            Ok(Self::Blocked)
+        } else if field.eq_ignore_ascii_case("dns") {
+            Ok(Self::DNS)
+        } else if field.eq_ignore_ascii_case("connect") {
+            Ok(Self::Connect)
+        } else if field.eq_ignore_ascii_case("send") {
+            Ok(Self::Send)
+        } else if field.eq_ignore_ascii_case("wait") {
+            Ok(Self::Wait)
+        } else if field.eq_ignore_ascii_case("receive") {
+            Ok(Self::Receive)
+        } else if field.eq_ignore_ascii_case("ssl") {
+            Ok(Self::SSL)
+        } else if field.eq_ignore_ascii_case("comment") {
+            Ok(Self::Comment)
+        } else {
+            Err(ParserError::new(0))
+        }
     }
 }
 
@@ -847,6 +1026,15 @@ impl std::fmt::Display for PageField {
             Self::Title           => "title".fmt(f),
             Self::Comment         => "comment".fmt(f),
         }
+    }
+}
+
+impl FromStr for PageField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -902,7 +1090,19 @@ impl Field for PageField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        unimplemented!()
+        if field.eq_ignore_ascii_case("index") {
+            Ok(Self::Index)
+        } else if field.eq_ignore_ascii_case("startedDateTime") {
+            Ok(Self::StartedDateTime)
+        } else if field.eq_ignore_ascii_case("id") {
+            Ok(Self::Id)
+        } else if field.eq_ignore_ascii_case("title") {
+            Ok(Self::Title)
+        } else if field.eq_ignore_ascii_case("comment") {
+            Ok(Self::Comment)
+        } else {
+            Err(ParserError::new(0))
+        }
     }
 }
 
@@ -922,6 +1122,15 @@ impl std::fmt::Display for PageTimingField {
             Self::OnLoad        => "onLoad".fmt(f),
             Self::Comment       => "comment".fmt(f),
         }
+    }
+}
+
+impl FromStr for PageTimingField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -977,6 +1186,16 @@ impl Field for PageTimingField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        unimplemented!()
+        if field.eq_ignore_ascii_case("Index") {
+            Ok(Self::Index)
+        } else if field.eq_ignore_ascii_case("OnContentLoad") {
+            Ok(Self::OnContentLoad)
+        } else if field.eq_ignore_ascii_case("OnLoad") {
+            Ok(Self::OnLoad)
+        } else if field.eq_ignore_ascii_case("Comment") {
+            Ok(Self::Comment)
+        } else {
+            Err(ParserError::new(0))
+        }
     }
 }

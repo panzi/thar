@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{app::{App, AppConfig, AppQuit}, event::Event, fields::{ContentField, EntryField, PageField, RequestField, ResponseField}, message::{MessageBroker, MessageReceiver}, rect::Rect, rich_text::{RichText, RichTextStyle}, schema::HAR, widget::Widget};
+use crate::{app::{App, AppConfig, AppQuit}, event::Event, fields::{ContentField, EntryField, PageField, RequestField, ResponseField}, message::{MessageBroker, MessageReceiver}, rect::Rect, schema::HAR, widget::Widget};
 
 use clap::Parser;
 
@@ -27,6 +27,12 @@ pub mod property_list;
 
 #[derive(Parser)]
 struct Args {
+    #[clap(long, use_value_delimiter = true, value_delimiter = ',')]
+    request_columns: Option<Vec<EntryField>>,
+
+    #[clap(long, use_value_delimiter = true, value_delimiter = ',')]
+    page_columns: Option<Vec<PageField>>,
+
     path: Option<OsString>,
 }
 
@@ -52,7 +58,7 @@ fn main() -> std::io::Result<()> {
 
     let mut broker = MessageBroker::new();
     let mut app = App::new(har, &AppConfig {
-        request_columns: &[
+        request_columns: args.request_columns.as_ref().map_or(&[
             EntryField::Index,
             EntryField::Request(RequestField::Method),
             EntryField::Request(RequestField::Url),
@@ -63,13 +69,13 @@ fn main() -> std::io::Result<()> {
             EntryField::Response(ResponseField::BodySize),
             EntryField::StartedDateTime,
             EntryField::Time,
-        ],
-        page_columns: &[
+        ], |fields| fields),
+        page_columns: args.page_columns.as_ref().map_or(&[
             PageField::Index,
             PageField::Id,
             PageField::StartedDateTime,
             PageField::Title,
-        ]
+        ], |fields| fields)
     });
 
     {
