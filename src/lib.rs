@@ -20,3 +20,4 @@ pub mod app;
 pub mod request_view;
 pub mod page_view;
 pub mod property_list;
+pub mod colorize;

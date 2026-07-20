@@ -746,7 +746,7 @@ fn parse_color_attr(rich_text: &str, mut index: usize) -> Result<(usize, Color),
     }
 }
 
-const DEFAULT_STYLE: RichTextStyle = RichTextStyle {
+pub const DEFAULT_STYLE: RichTextStyle = RichTextStyle {
     font_weight: FontWeight::Normal,
     text_decoration: TextDecoration::None,
     font_style: FontStyle::Normal,
@@ -754,7 +754,7 @@ const DEFAULT_STYLE: RichTextStyle = RichTextStyle {
     background: Color::Default,
 };
 
-const CONTROL_STYLE: RichTextStyle = RichTextStyle {
+pub const CONTROL_STYLE: RichTextStyle = RichTextStyle {
     foreground: Color::Color16(Color16::Blue),
     ..DEFAULT_STYLE
 };

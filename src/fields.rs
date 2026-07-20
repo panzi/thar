@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
+use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}, colorize::colorize_json};
 
 use std::{fmt::Write, str::FromStr};
 
@@ -643,7 +643,20 @@ impl Field for ContentField {
             }
             Self::Text => {
                 if let Some(text) = &content.text {
-                    rich_text.append_plain_text(text);
+                    if let Some(mime_type) = &content.mime_type {
+                        let mime_type = mime_type.split(';').next().unwrap_or(&mime_type);
+
+                        if mime_type == "text/html" || mime_type.ends_with("+xml") {
+                            // TODO
+                            rich_text.append_plain_text(text);
+                        } else if mime_type == "application/json" || mime_type.ends_with("+json") {
+                            colorize_json(text, rich_text);
+                        } else {
+                            rich_text.append_plain_text(text);
+                        }
+                    } else {
+                        rich_text.append_plain_text(text);
+                    }
                 }
             }
             Self::Comment => {
