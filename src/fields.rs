@@ -490,19 +490,19 @@ impl std::fmt::Display for RequestField {
 
 pub fn get_method_color(method: &str) -> Color {
     if method.eq_ignore_ascii_case("GET") {
-        Color::Color16(Color16::Green)
+        Color::from_u32(0x00FF00)
     } else if method.eq_ignore_ascii_case("POST") {
-        Color::Color16(Color16::Yellow)
+        Color::from_u32(0xFFAA00)
     } else if method.eq_ignore_ascii_case("PUT") {
-        Color::Color16(Color16::Cyan)
+        Color::from_u32(0x00FFFF)
     } else if method.eq_ignore_ascii_case("PATCH") {
-        Color::Color16(Color16::Blue)
+        Color::from_u32(0x0088FF)
     } else if method.eq_ignore_ascii_case("DELETE") {
-        Color::Color16(Color16::Red)
+        Color::from_u32(0xFF2200)
     } else if method.eq_ignore_ascii_case("HEAD") {
-        Color::Color16(Color16::Magenta)
+        Color::from_u32(0xEE00EE)
     } else {
-        Color::Color16(Color16::BrightBlack)
+        Color::from_u32(0xAAAAAA)
     }
 }
 
@@ -668,19 +668,19 @@ pub enum ResponseField {
 
 fn get_staus_color(status: u32) -> Color {
     if status < 100 {
-        Color::Color16(Color16::Magenta)
+        Color::from_u32(0xEE00EE)
     } else if status < 200 {
-        Color::Color16(Color16::Cyan)
+        Color::from_u32(0xAAAAAA)
     } else if status < 300 {
-        Color::Color16(Color16::Green)
+        Color::from_u32(0x00FF00)
     } else if status < 400 {
-        Color::Color16(Color16::Blue)
+        Color::from_u32(0x0088FF)
     } else if status < 500 {
-        Color::Color16(Color16::Yellow)
+        Color::from_u32(0xFFAA00)
     } else if status < 600 {
-        Color::Color16(Color16::Red)
+        Color::from_u32(0xFF2200)
     } else {
-        Color::Color16(Color16::Magenta)
+        Color::from_u32(0xEE00EE)
     }
 }
 
@@ -922,7 +922,7 @@ impl Field for ContentField {
                         if mime_type == "text/html" || mime_type.ends_with("+xml") {
                             // TODO
                             rich_text.append_plain_text(text);
-                        } else if mime_type == "application/json" || mime_type == "test/javascript" || mime_type.ends_with("+json") {
+                        } else if mime_type == "application/json" || mime_type.ends_with("+json") {
                             colorize_json(text, rich_text);
                         } else {
                             rich_text.append_plain_text(text);

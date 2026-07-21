@@ -21,33 +21,38 @@ fn find_ok_json_char(text: &str, index: usize) -> usize {
 }
 
 const ERROR_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::Color16(Color16::White),
-    background: Color::Color16(Color16::Red),
+    foreground: Color::from_u32(0xFFFFFF),
+    background: Color::from_u32(0xFF2200),
     ..DEFAULT_STYLE
 };
 
 const NUMBER_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::Color16(Color16::Green),
+    foreground: Color::from_u32(0x00FF00),
     ..DEFAULT_STYLE
 };
 
 const SYMBOL_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::Color16(Color16::Blue),
+    foreground: Color::from_u32(0x0088FF),
     ..DEFAULT_STYLE
 };
 
 const KEYWORD_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::Color16(Color16::Cyan),
+    foreground: Color::from_u32(0x00FFFF),
     ..DEFAULT_STYLE
 };
 
 const STRING_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::Color16(Color16::Red),
+    foreground: Color::from_u32(0xFF2200),
     ..DEFAULT_STYLE
 };
 
 const ESCAPE_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::Color16(Color16::Yellow),
+    foreground: Color::from_u32(0xFFAA00),
+    ..DEFAULT_STYLE
+};
+
+const COMMENT_STYLE: RichTextStyle = RichTextStyle {
+    foreground: Color::from_u32(0xAAAAAA),
     ..DEFAULT_STYLE
 };
 
@@ -281,6 +286,55 @@ pub fn colorize_json(json: &str, rich_text: &mut RichText) {
     }
 }
 
+fn find_sgml_start(sgml: &str, index: usize) -> usize {
+    let Some(sub_index) = sgml[index..].find(|ch: char| matches!(ch, '<' | '&')) else {
+        return sgml.len();
+    };
+
+    index + sub_index
+}
+
 pub fn colorize_sgml(sgml: &str, rich_text: &mut RichText) {
-    unimplemented!()
+    let mut prev = 0;
+    let mut index = find_sgml_start(sgml, 0);
+
+    loop {
+        if index > prev {
+            rich_text.append_plain_text(&sgml[prev..index]);
+        }
+        prev = index;
+
+        let suffix = &sgml[index..];
+        if suffix.starts_with("<![CDATA[") {
+            // CDATA section
+            index += "<![CDATA[".len();
+            let Some(sub_index) = sgml[index..].find("]]>") else {
+                rich_text.append_text(&ERROR_STYLE, &sgml[prev..]);
+                return;
+            };
+            index += sub_index;
+            rich_text.append_text(&COMMENT_STYLE, &sgml[prev..index]);
+        } else if suffix.starts_with("<!--") {
+            // comment
+            index += "<!--".len();
+            let Some(sub_index) = sgml[index..].find("-->") else {
+                rich_text.append_text(&COMMENT_STYLE, &sgml[prev..]);
+                return;
+            };
+            index += sub_index;
+            rich_text.append_text(&COMMENT_STYLE, &sgml[prev..index]);
+        } else if suffix.starts_with("<!DOCTYPE") {
+            // TODO: DOCTYPE
+        } else if suffix.starts_with("<?") {
+            // TODO: processing instructions
+        } else if suffix.starts_with('<') {
+            // TODO: tags
+        } else {
+            // &
+            // TODO: entity reference
+        }
+
+        prev = index;
+        index = find_sgml_start(sgml, index);
+    }
 }

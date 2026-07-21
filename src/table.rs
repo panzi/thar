@@ -335,10 +335,10 @@ impl Table {
     }
 }
 
-const EVEN_BACKGROUND:          Color = Color::from_u32(0x222222);
+const EVEN_BACKGROUND:          Color = Color::from_u32(0x111111);
 const ODD_BACKGROUND:           Color = Color::from_u32(0x000000);
-const SELECTED_EVEN_BACKGROUND: Color = Color::from_u32(0x555555);
-const SELECTED_ODD_BACKGROUND:  Color = Color::from_u32(0x444444);
+const SELECTED_EVEN_BACKGROUND: Color = Color::from_u32(0x333333);
+const SELECTED_ODD_BACKGROUND:  Color = Color::from_u32(0x222222);
 const FOREGROUND:               Color = Color::from_u32(0xFFFFFF);
 
 impl Widget for Table {
