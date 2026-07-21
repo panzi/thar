@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{Widget, WidgetId, next_widget_id}};
+use crate::{color::Color, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{Widget, WidgetId, next_widget_id}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
@@ -335,6 +335,12 @@ impl Table {
     }
 }
 
+const EVEN_BACKGROUND:          Color = Color::from_u32(0x222222);
+const ODD_BACKGROUND:           Color = Color::from_u32(0x000000);
+const SELECTED_EVEN_BACKGROUND: Color = Color::from_u32(0x555555);
+const SELECTED_ODD_BACKGROUND:  Color = Color::from_u32(0x444444);
+const FOREGROUND:               Color = Color::from_u32(0xFFFFFF);
+
 impl Widget for Table {
     #[inline]
     fn widget_id(&self) -> WidgetId {
@@ -358,12 +364,8 @@ impl Widget for Table {
         let row    = row    + parent_row;
         let column = column + parent_column;
 
-        let even_bg = Color::from_u32(0x555555);
-        let odd_bg = Color::Color16(Color16::Black);
-        let fg = Color::Color16(Color16::White);
-
-        let mut scoped_state = ScopedTermIOState::default_bg(termio, odd_bg);
-        let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), fg);
+        let mut scoped_state = ScopedTermIOState::default_bg(termio, ODD_BACKGROUND);
+        let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), FOREGROUND);
 
         {
             scoped_state.termio_mut().font_weight(FontWeight::Bold)?;
@@ -409,14 +411,12 @@ impl Widget for Table {
 
             let mut scoped_state = ScopedTermIOState::default_bg(
                 scoped_state.termio_mut(),
-                if ((current_row_index + scroll_row as usize) & 1) == 0 { even_bg } else { odd_bg }
+                if ((current_row_index + scroll_row as usize) & 1) == 0 {
+                    if current_row_index == selected_row_index { SELECTED_EVEN_BACKGROUND } else { EVEN_BACKGROUND }
+                } else {
+                    if current_row_index == selected_row_index { SELECTED_ODD_BACKGROUND } else { ODD_BACKGROUND }
+                }
             );
-
-            let mut scoped_state = if current_row_index == selected_row_index {
-                ScopedTermIOState::inverted(scoped_state.termio_mut(), true)
-            } else {
-                ScopedTermIOState::none(scoped_state.termio_mut())
-            };
 
             let offset_body_height = body_height as i32 - scroll_row as i32;
 
