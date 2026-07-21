@@ -171,7 +171,7 @@ impl Color {
     pub const fn from_u32(color: u32) -> Self {
         Self::Rgb {
             r: ((color >> 16) & 0xFF) as u8,
-            g: ((color >>  0) & 0xFF) as u8,
+            g: ((color >>  8) & 0xFF) as u8,
             b: (color         & 0xFF) as u8,
         }
     }
