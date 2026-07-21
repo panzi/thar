@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, rich_text::{RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}, colorize::colorize_json};
+use crate::{color::{Color, Color16}, colorize::colorize_json, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
 
 use std::{fmt::Write, str::FromStr};
 
@@ -64,6 +64,12 @@ pub enum EntryField {
     ServerIpAddress,
     Connection,
     Comment,
+    _ConnectionId,
+    _SecurityState,
+    _Initiator(InitiatorField),
+    _Priority,
+    _ResourceType,
+    _FromCache,
 }
 
 impl std::fmt::Display for EntryField {
@@ -79,6 +85,12 @@ impl std::fmt::Display for EntryField {
             Self::ServerIpAddress  => "serverIPAddress".fmt(f),
             Self::Connection       => "connection".fmt(f),
             Self::Comment          => "comment".fmt(f),
+            Self::_ConnectionId    => "_connectionId".fmt(f),
+            Self::_SecurityState   => "_securityState".fmt(f),
+            Self::_Initiator(init) => write!(f, "_initiator.{init}"),
+            Self::_Priority        => "_priority".fmt(f),
+            Self::_ResourceType    => "_resourceType".fmt(f),
+            Self::_FromCache       => "_fromCache".fmt(f),
         }
     }
 }
@@ -108,6 +120,12 @@ impl Field for EntryField {
             Self::ServerIpAddress  => "Server IP",
             Self::Connection       => "Connection",
             Self::Comment          => "Comment",
+            Self::_ConnectionId    => "Connection Id",
+            Self::_SecurityState   => "Security State",
+            Self::_Initiator(init) => init.header(),
+            Self::_Priority        => "Priority",
+            Self::_ResourceType    => "Resource Type",
+            Self::_FromCache       => "From Cache",
         }
     }
 
@@ -124,6 +142,12 @@ impl Field for EntryField {
             Self::ServerIpAddress  => Align::Right,
             Self::Connection       => Align::Left,
             Self::Comment          => Align::Left,
+            Self::_ConnectionId    => Align::Left,
+            Self::_SecurityState   => Align::Left,
+            Self::_Initiator(init) => init.align(),
+            Self::_Priority        => Align::Left,
+            Self::_ResourceType    => Align::Left,
+            Self::_FromCache       => Align::Left,
         }
     }
 
@@ -170,8 +194,42 @@ impl Field for EntryField {
                 }
             }
             Self::Comment => {
-                if let Some(connection) = &entry.comment {
-                    rich_text.append_plain_text(connection);
+                if let Some(comment) = &entry.comment {
+                    rich_text.append_plain_text(comment);
+                }
+            }
+            Self::_ConnectionId => {
+                if let Some(value) = &entry._connection_id {
+                    rich_text.append_plain_text(value);
+                }
+            }
+            Self::_SecurityState => {
+                if let Some(value) = &entry._security_state {
+                    write!(buf, "{value}")?;
+                    rich_text.append_plain_text(&buf);
+                }
+            }
+            Self::_Initiator(init) => {
+                if let Some(value) = &entry._initiator {
+                    init.write_rich_text(0, value, rich_text, buf)?;
+                }
+            }
+            Self::_Priority => {
+                if let Some(value) = &entry._priority {
+                    write!(buf, "{value}")?;
+                    rich_text.append_plain_text(&buf);
+                }
+            }
+            Self::_ResourceType => {
+                if let Some(value) = &entry._resource_type {
+                    write!(buf, "{value}")?;
+                    rich_text.append_plain_text(&buf);
+                }
+            }
+            Self::_FromCache => {
+                if let Some(value) = &entry._from_cache {
+                    write!(buf, "{value}")?;
+                    rich_text.append_plain_text(&buf);
                 }
             }
         }
@@ -198,6 +256,10 @@ impl Field for EntryField {
                 Ok(EntryField::Timings(
                     TimingsField::parse(tail).map_err(map_err)?
                 ))
+            } else if head.eq_ignore_ascii_case("_initiator") {
+                Ok(EntryField::_Initiator(
+                    InitiatorField::parse(tail).map_err(map_err)?
+                ))
             } else {
                 Err(ParserError::new(0))
             }
@@ -213,6 +275,109 @@ impl Field for EntryField {
             Ok(EntryField::Connection)
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(EntryField::Comment)
+        } else if field.eq_ignore_ascii_case("_connectionId") {
+            Ok(EntryField::_ConnectionId)
+        } else if field.eq_ignore_ascii_case("_securityState") {
+            Ok(EntryField::_SecurityState)
+        } else if field.eq_ignore_ascii_case("_priority") {
+            Ok(EntryField::_Priority)
+        } else if field.eq_ignore_ascii_case("_resourceType") {
+            Ok(EntryField::_ResourceType)
+        } else if field.eq_ignore_ascii_case("_fromCache") {
+            Ok(EntryField::_FromCache)
+        } else {
+            Err(ParserError::new(0))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitiatorField {
+    Type,
+    Url,
+    LineNumber,
+}
+
+impl std::fmt::Display for InitiatorField {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Type => "type".fmt(f),
+            Self::Url  => "url".fmt(f),
+            Self::LineNumber => "lineNumber".fmt(f),
+        }
+    }
+}
+
+impl FromStr for InitiatorField {
+    type Err = ParserError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl Field for InitiatorField {
+    type Value = Initiator;
+
+    #[inline]
+    fn header(&self) -> &str {
+        match self {
+            Self::Type => "Initiator Type",
+            Self::Url  => "Initiator URL",
+            Self::LineNumber => "Initiator Line",
+        }
+    }
+
+    #[inline]
+    fn align(&self) -> Align {
+        match self {
+            Self::Type => Align::Left,
+            Self::Url  => Align::Left,
+            Self::LineNumber => Align::Right,
+        }
+    }
+
+    fn write_rich_text(&self, _index: usize, init: &Initiator, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+        match self {
+            Self::Type => {
+                match init {
+                    Initiator::Script { .. } => {
+                        rich_text.append_plain_text("script");
+                    }
+                    Initiator::Parser { .. } => {
+                        rich_text.append_plain_text("parser");
+                    }
+                    Initiator::Other => {
+                        rich_text.append_plain_text("other");
+                    }
+                }
+            },
+            Self::Url => {
+                if let Initiator::Parser { url, .. } = init {
+                    write!(buf, "{url}")?;
+                    rich_text.append_plain_text(buf);
+                }
+            },
+            Self::LineNumber => {
+                if let Initiator::Parser { line_number, .. } = init {
+                    write!(buf, "{line_number}")?;
+                    rich_text.append_plain_text(buf);
+                }
+            },
+        }
+
+        Ok(())
+    }
+
+    fn parse(field: &str) -> Result<Self, ParserError> {
+        if field.eq_ignore_ascii_case("type") {
+            Ok(Self::Type)
+        } else if field.eq_ignore_ascii_case("url") {
+            Ok(Self::Url)
+        } else if field.eq_ignore_ascii_case("lineNumber") {
+            Ok(Self::LineNumber)
         } else {
             Err(ParserError::new(0))
         }
@@ -429,6 +594,9 @@ pub enum ResponseField {
     HeadersSize,
     BodySize,
     Comment,
+    _TransferSize,
+    _Error,
+    _FetchedViaServiceWorker,
 }
 
 fn get_staus_color(status: u32) -> Color {
@@ -459,6 +627,9 @@ impl std::fmt::Display for ResponseField {
             Self::HeadersSize      => "headerSize".fmt(f),
             Self::BodySize         => "bodySize".fmt(f),
             Self::Comment          => "comment".fmt(f),
+            Self::_TransferSize    => "_transferSize".fmt(f),
+            Self::_Error           => "_error".fmt(f),
+            Self::_FetchedViaServiceWorker => "_fetchedViaServiceWorker".fmt(f),
         }
     }
 }
@@ -471,6 +642,11 @@ impl FromStr for ResponseField {
         Self::parse(s)
     }
 }
+
+const ERROR_STYLE: RichTextStyle = RichTextStyle {
+    foreground: Color::Color16(Color16::Red),
+    ..DEFAULT_STYLE
+};
 
 impl Field for ResponseField {
     type Value = Response;
@@ -485,6 +661,9 @@ impl Field for ResponseField {
             Self::HeadersSize      => "Response Headers Size",
             Self::BodySize         => "Response Body Size",
             Self::Comment          => "Response Comment",
+            Self::_TransferSize    => "Transfer Size",
+            Self::_Error           => "Error",
+            Self::_FetchedViaServiceWorker => "Fetched Via Service Worker",
         }
     }
 
@@ -498,6 +677,9 @@ impl Field for ResponseField {
             Self::HeadersSize      => Align::Right,
             Self::BodySize         => Align::Right,
             Self::Comment          => Align::Left,
+            Self::_TransferSize    => Align::Right,
+            Self::_Error           => Align::Left,
+            Self::_FetchedViaServiceWorker => Align::Left,
         }
     }
 
@@ -536,6 +718,20 @@ impl Field for ResponseField {
                     rich_text.append_plain_text(comment);
                 }
             },
+            Self::_TransferSize => {
+                write!(buf, "{}", response._transfer_size)?;
+                rich_text.append_plain_text(buf);
+            },
+            Self::_Error => {
+                if let Some(error) = &response._error {
+                    rich_text.append_text(&ERROR_STYLE, error);
+                }
+            },
+            Self::_FetchedViaServiceWorker => {
+                if let &Some(value) = &response._fetched_via_service_worker {
+                    rich_text.append_plain_text(if value { "true" } else { "false" });
+                }
+            },
         }
 
         Ok(())
@@ -563,6 +759,12 @@ impl Field for ResponseField {
             Ok(Self::BodySize)
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
+        } else if field.eq_ignore_ascii_case("_transferSize") {
+            Ok(Self::_TransferSize)
+        } else if field.eq_ignore_ascii_case("_error") {
+            Ok(Self::_Error)
+        } else if field.eq_ignore_ascii_case("_fetchedViaServiceWorker") {
+            Ok(Self::_FetchedViaServiceWorker)
         } else {
             Err(ParserError::new(0))
         }
@@ -653,7 +855,7 @@ impl Field for ContentField {
                         if mime_type == "text/html" || mime_type.ends_with("+xml") {
                             // TODO
                             rich_text.append_plain_text(text);
-                        } else if mime_type == "application/json" || mime_type.ends_with("+json") {
+                        } else if mime_type == "application/json" || mime_type == "test/javascript" || mime_type.ends_with("+json") {
                             colorize_json(text, rich_text);
                         } else {
                             rich_text.append_plain_text(text);
@@ -911,6 +1113,11 @@ pub enum TimingsField {
     Receive,
     SSL,
     Comment,
+    _BlockedQueueing,
+    _WorkerStart,
+    _WorkerReady,
+    _WorkerFetchStart,
+    _WorkerRespondWithSettled,
 }
 
 impl std::fmt::Display for TimingsField {
@@ -924,6 +1131,11 @@ impl std::fmt::Display for TimingsField {
             Self::Receive => "receive".fmt(f),
             Self::SSL     => "ssl".fmt(f),
             Self::Comment => "comment".fmt(f),
+            Self::_BlockedQueueing  => "_blocked_queueing".fmt(f),
+            Self::_WorkerStart      => "_workerStart".fmt(f),
+            Self::_WorkerReady      => "_workerReady".fmt(f),
+            Self::_WorkerFetchStart => "_workerFetchStart".fmt(f),
+            Self::_WorkerRespondWithSettled => "_workerRespondWithSettled".fmt(f),
         }
     }
 }
@@ -951,6 +1163,11 @@ impl Field for TimingsField {
             Self::Receive => "Receive",
             Self::SSL     => "SSL",
             Self::Comment => "Timings Comment",
+            Self::_BlockedQueueing  => "Blocked Queueing",
+            Self::_WorkerStart      => "Worker Start",
+            Self::_WorkerReady      => "Worker Ready",
+            Self::_WorkerFetchStart => "Worker Fetch Start",
+            Self::_WorkerRespondWithSettled => "Worker Respond With Settled",
         }
     }
 
@@ -965,6 +1182,11 @@ impl Field for TimingsField {
             Self::Receive => Align::Right,
             Self::SSL     => Align::Right,
             Self::Comment => Align::Left,
+            Self::_BlockedQueueing  => Align::Right,
+            Self::_WorkerStart      => Align::Right,
+            Self::_WorkerReady      => Align::Right,
+            Self::_WorkerFetchStart => Align::Right,
+            Self::_WorkerRespondWithSettled => Align::Right,
         }
     }
 
@@ -1004,6 +1226,26 @@ impl Field for TimingsField {
                     rich_text.append_plain_text(comment);
                 }
             }
+            Self::_BlockedQueueing => {
+                write!(buf, "{}", timings._blocked_queueing)?;
+                rich_text.append_plain_text(buf);
+            }
+            Self::_WorkerStart => {
+                write!(buf, "{}", timings._worker_start)?;
+                rich_text.append_plain_text(buf);
+            }
+            Self::_WorkerReady => {
+                write!(buf, "{}", timings._worker_ready)?;
+                rich_text.append_plain_text(buf);
+            }
+            Self::_WorkerFetchStart => {
+                write!(buf, "{}", timings._worker_fetch_start)?;
+                rich_text.append_plain_text(buf);
+            }
+            Self::_WorkerRespondWithSettled => {
+                write!(buf, "{}", timings._worker_respond_with_settled)?;
+                rich_text.append_plain_text(buf);
+            }
         }
 
         Ok(())
@@ -1024,6 +1266,16 @@ impl Field for TimingsField {
             Ok(Self::Receive)
         } else if field.eq_ignore_ascii_case("ssl") {
             Ok(Self::SSL)
+        } else if field.eq_ignore_ascii_case("_blocked_queueing") || field.eq_ignore_ascii_case("_blockedQueueing") {
+            Ok(Self::_BlockedQueueing)
+        } else if field.eq_ignore_ascii_case("_workerStart") {
+            Ok(Self::_WorkerStart)
+        } else if field.eq_ignore_ascii_case("_workerReady") {
+            Ok(Self::_WorkerReady)
+        } else if field.eq_ignore_ascii_case("_workerFetchStart") {
+            Ok(Self::_WorkerFetchStart)
+        } else if field.eq_ignore_ascii_case("_workerRespondWithSettled") {
+            Ok(Self::_WorkerRespondWithSettled)
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
         } else {
@@ -1038,6 +1290,7 @@ pub enum PageField {
     StartedDateTime,
     Id,
     Title,
+    PageTimings(PageTimingsField),
     Comment,
 }
 
@@ -1048,6 +1301,7 @@ impl std::fmt::Display for PageField {
             Self::StartedDateTime => "startedDateTime".fmt(f),
             Self::Id              => "id".fmt(f),
             Self::Title           => "title".fmt(f),
+            Self::PageTimings(timings) => write!(f, "pageTimings.{timings}"),
             Self::Comment         => "comment".fmt(f),
         }
     }
@@ -1072,6 +1326,7 @@ impl Field for PageField {
             Self::StartedDateTime => "Started At",
             Self::Id              => "Id",
             Self::Title           => "Title",
+            Self::PageTimings(timings) => timings.header(),
             Self::Comment         => "Comment",
         }
     }
@@ -1083,6 +1338,7 @@ impl Field for PageField {
             Self::StartedDateTime => Align::Left,
             Self::Id              => Align::Left,
             Self::Title           => Align::Left,
+            Self::PageTimings(timings) => timings.align(),
             Self::Comment         => Align::Left,
         }
     }
@@ -1103,6 +1359,11 @@ impl Field for PageField {
             Self::Title => {
                 rich_text.append_plain_text(&page.title);
             }
+            Self::PageTimings(timings) => {
+                if let Some(value) = &page.page_timings {
+                    timings.write_rich_text(0, value, rich_text, buf)?;
+                }
+            }
             Self::Comment => {
                 if let Some(connection) = &page.comment {
                     rich_text.append_plain_text(connection);
@@ -1114,7 +1375,16 @@ impl Field for PageField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        if field.eq_ignore_ascii_case("index") {
+        if let Some((head, tail)) = field.split_once('.') {
+            let map_err = |err: ParserError| ParserError::new(head.len() + 1 + err.index());
+            if head.eq_ignore_ascii_case("pageTimings") {
+                Ok(PageField::PageTimings(
+                    PageTimingsField::parse(tail).map_err(map_err)?
+                ))
+            } else {
+                Err(ParserError::new(0))
+            }
+        } else if field.eq_ignore_ascii_case("index") {
             Ok(Self::Index)
         } else if field.eq_ignore_ascii_case("startedDateTime") {
             Ok(Self::StartedDateTime)
@@ -1131,17 +1401,15 @@ impl Field for PageField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageTimingField {
-    Index,
+pub enum PageTimingsField {
     OnContentLoad,
     OnLoad,
     Comment,
 }
 
-impl std::fmt::Display for PageTimingField {
+impl std::fmt::Display for PageTimingsField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Index         => "index".fmt(f),
             Self::OnContentLoad => "onContentLoad".fmt(f),
             Self::OnLoad        => "onLoad".fmt(f),
             Self::Comment       => "comment".fmt(f),
@@ -1149,7 +1417,7 @@ impl std::fmt::Display for PageTimingField {
     }
 }
 
-impl FromStr for PageTimingField {
+impl FromStr for PageTimingsField {
     type Err = ParserError;
 
     #[inline]
@@ -1158,13 +1426,12 @@ impl FromStr for PageTimingField {
     }
 }
 
-impl Field for PageTimingField {
+impl Field for PageTimingsField {
     type Value = PageTiming;
 
     #[inline]
     fn header(&self) -> &str {
         match self {
-            Self::Index         => "Index",
             Self::OnContentLoad => "On Content Load",
             Self::OnLoad        => "On Load",
             Self::Comment       => "Comment",
@@ -1174,19 +1441,14 @@ impl Field for PageTimingField {
     #[inline]
     fn align(&self) -> Align {
         match self {
-            Self::Index         => Align::Right,
             Self::OnContentLoad => Align::Left,
             Self::OnLoad        => Align::Left,
             Self::Comment       => Align::Left,
         }
     }
 
-    fn write_rich_text(&self, index: usize, timing: &PageTiming, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, _index: usize, timing: &PageTiming, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
-            Self::Index => {
-                write!(buf, "{index}")?;
-                rich_text.append_plain_text(buf);
-            }
             Self::OnContentLoad => {
                 if let Some(value) = &timing.on_content_load {
                     write!(buf, "{value}")?;
@@ -1210,9 +1472,7 @@ impl Field for PageTimingField {
     }
 
     fn parse(field: &str) -> Result<Self, ParserError> {
-        if field.eq_ignore_ascii_case("Index") {
-            Ok(Self::Index)
-        } else if field.eq_ignore_ascii_case("OnContentLoad") {
+        if field.eq_ignore_ascii_case("OnContentLoad") {
             Ok(Self::OnContentLoad)
         } else if field.eq_ignore_ascii_case("OnLoad") {
             Ok(Self::OnLoad)

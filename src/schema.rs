@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, de::Visitor};
 use time::OffsetDateTime;
 use url::Url;
 
@@ -15,6 +15,7 @@ pub struct Log {
     pub browser: Option<AppInfo>,
     #[serde(default)]
     pub pages: Vec<Page>,
+    #[serde(default)]
     pub entries: Vec<Entry>,
     pub comment: Option<String>,
 }
@@ -33,7 +34,7 @@ pub struct Page {
     pub id: String,
     pub title: String,
     #[serde(rename = "pageTimings")]
-    pub page_timings: Vec<PageTiming>,
+    pub page_timings: Option<PageTiming>,
     pub comment: Option<String>,
 }
 
@@ -97,6 +98,17 @@ pub enum SecurityState {
     Secure,
 }
 
+impl std::fmt::Display for SecurityState {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Insecure => "insecure".fmt(f),
+            Self::Broken   => "broken".fmt(f),
+            Self::Secure   => "secure".fmt(f),
+        }
+    }
+}
+
 /// Chrome extension.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -115,12 +127,42 @@ pub enum ResourceType {
     Other,
 }
 
+impl std::fmt::Display for ResourceType {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Document   => "document".fmt(f),
+            Self::StyleSheet => "stylesheet".fmt(f),
+            Self::Image      => "image".fmt(f),
+            Self::Media      => "media".fmt(f),
+            Self::Font       => "font".fmt(f),
+            Self::Script     => "script".fmt(f),
+            Self::XHR        => "xhr".fmt(f),
+            Self::Fetch      => "fetch".fmt(f),
+            Self::WebSocket  => "websocket".fmt(f),
+            Self::Manifest   => "manifest".fmt(f),
+            Self::Ping       => "ping".fmt(f),
+            Self::Other      => "other".fmt(f),
+        }
+    }
+}
+
 /// Chrome extension.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum CacheSource {
     Disk,
     Memory,
+}
+
+impl std::fmt::Display for CacheSource {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Disk   => "disk".fmt(f),
+            Self::Memory => "memory".fmt(f),
+        }
+    }
 }
 
 /// Chrome extension.
@@ -131,6 +173,19 @@ pub enum Priority {
     Medium,
     Low,
     VeryLow,
+}
+
+impl std::fmt::Display for Priority {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::VeryHigh => "VeryHigh".fmt(f),
+            Self::High     => "High".fmt(f),
+            Self::Medium   => "Medium".fmt(f),
+            Self::Low      => "Low".fmt(f),
+            Self::VeryLow  => "VeryLow".fmt(f),
+        }
+    }
 }
 
 /// Chromium extension.
@@ -145,7 +200,7 @@ pub enum Initiator {
     },
     #[serde(rename = "script")]
     Script {
-        stack: Vec<StackFrame>
+        stack: Option<Stack>
     },
     #[serde(rename = "other")]
     Other,
@@ -153,8 +208,14 @@ pub enum Initiator {
 
 /// Chromium extension.
 #[derive(Deserialize, Clone, Debug)]
-#[serde(rename_all = "lowercase")]
-pub struct StackFrame {
+pub struct Stack {
+    #[serde(rename = "callFrames", default)]
+    pub call_frames: Vec<CallFrame>,
+}
+
+/// Chromium extension.
+#[derive(Deserialize, Clone, Debug)]
+pub struct CallFrame {
     #[serde(rename = "functionName", default)]
     pub function_name: String,
 
@@ -189,7 +250,7 @@ pub struct Request {
     pub cookies: Vec<Cookie>,
     #[serde(default)]
     pub headers: Vec<Header>,
-    #[serde(rename = "queryString")]
+    #[serde(rename = "queryString", default)]
     pub query_string: Vec<QueryParam>,
     #[serde(rename = "postData")]
     pub post_data: Option<PostData>,
@@ -218,7 +279,7 @@ pub struct Response {
 
     pub content: Option<Content>,
 
-    #[serde(rename = "redirectURL")]
+    #[serde(rename = "redirectURL", deserialize_with = "deserialize_optional_url", default)]
     pub redirect_url: Option<Url>,
 
     #[serde(rename = "headersSize", default = "unavailable_i64")]
@@ -239,6 +300,38 @@ pub struct Response {
     /// Chrome extension.
     #[serde(rename = "_fetchedViaServiceWorker")]
     pub _fetched_via_service_worker: Option<bool>,
+}
+
+fn deserialize_optional_url<'de, D>(deserializer: D) -> Result<Option<Url>, D::Error>
+where D: Deserializer<'de> {
+    struct OptionalUrlVisitor;
+
+    impl<'de> Visitor<'de> for OptionalUrlVisitor {
+        type Value = Option<Url>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("URL")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where E: serde::de::Error {
+            Ok(None)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where E: serde::de::Error {
+            if v.is_empty() {
+                return Ok(None);
+            }
+
+            match Url::parse(v) {
+                Ok(url) => Ok(Some(url)),
+                Err(err) => Err(E::custom(err.to_string()))
+            }
+        }
+    }
+
+    deserializer.deserialize_any(OptionalUrlVisitor)
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -338,6 +431,7 @@ pub struct Cookie {
 pub struct PostData {
     #[serde(rename = "mimeType")]
     pub mime_type: Option<String>,
+    #[serde(default)]
     pub params: Vec<PostParam>,
     pub text: Option<String>,
     pub comment: Option<String>,

@@ -40,22 +40,20 @@ struct Args {
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
-    let mut har: HAR = if let Some(path) = args.path {
+    let har: HAR = if let Some(path) = args.path {
         let file = File::open(path)?;
         serde_json::from_reader(BufReader::new(file))?
     } else {
         serde_json::from_reader(std::io::stdin())?
     };
 
-    {
-        // DEBUG: make list big
-        let entry_len = har.log.entries.len();
-        for _ in 0..10 {
-            har.log.entries.extend_from_within(0..entry_len);
-        }
-    }
-
-    let mut termio = termio::TermIO::from_tty()?;
+    // {
+    //     // DEBUG: make list big
+    //     let entry_len = har.log.entries.len();
+    //     for _ in 0..10 {
+    //         har.log.entries.extend_from_within(0..entry_len);
+    //     }
+    // }
 
     let mut broker = MessageBroker::new();
     let mut app = App::new(har, &AppConfig {
@@ -78,6 +76,8 @@ fn main() -> std::io::Result<()> {
             PageField::Title,
         ], |fields| fields)
     });
+
+    let mut termio = termio::TermIO::from_tty()?;
 
     {
         let window_size = termio.window_size();
