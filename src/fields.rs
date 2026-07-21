@@ -1,6 +1,6 @@
-use crate::{color::{Color, Color16}, colorize::colorize_json, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
+use crate::{char_width::CharWidth, color::{Color, Color16}, colorize::colorize_json, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
 
-use std::{fmt::Write, str::FromStr};
+use std::{fmt::Write, marker::PhantomData};
 
 pub trait Field: Sized + std::fmt::Display {
     type Value;
@@ -17,7 +17,7 @@ pub trait Field: Sized + std::fmt::Display {
         }
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError>;
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>>;
 }
 
 impl<F> From<F> for ColumnDef where F: Field {
@@ -28,14 +28,20 @@ impl<F> From<F> for ColumnDef where F: Field {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ParserError {
+pub struct ParserError<'a> {
+    input: &'a str,
     index: usize,
 }
 
-impl ParserError {
+impl<'a> ParserError<'a> {
     #[inline]
-    pub fn new(index: usize) -> Self {
-        Self { index }
+    pub fn new(input: &'a str, index: usize) -> Self {
+        Self { input, index }
+    }
+
+    #[inline]
+    pub fn input(&self) -> &str {
+        self.input
     }
 
     #[inline]
@@ -44,11 +50,23 @@ impl ParserError {
     }
 }
 
-impl std::error::Error for ParserError {}
+impl<'a> std::error::Error for ParserError<'a> {}
 
-impl std::fmt::Display for ParserError {
+impl<'a> std::fmt::Display for ParserError<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error parsing field at index {}", self.index)
+        writeln!(f, "Error parsing column at index {}:\n", self.index)?;
+
+        let mut index = 0;
+        for line in self.input.split('\n') {
+            writeln!(f, "    {line}")?;
+            if self.index >= index && self.index <= index + line.len() {
+                let width = line[..self.index - index].char_width_ignore_unprintable();
+                writeln!(f, "----{:-^width$}^", "")?;
+            }
+            index += 1;
+        }
+
+        Ok(())
     }
 }
 
@@ -95,11 +113,60 @@ impl std::fmt::Display for EntryField {
     }
 }
 
-impl FromStr for EntryField {
-    type Err = ParserError;
+#[derive(Clone, Copy, Debug)]
+pub struct FieldParser<F> where F: Field {
+    phantom: PhantomData<F>
+}
+
+impl<F> clap::builder::TypedValueParser for FieldParser<F>
+where F: Field + Clone + Send + Sync + Sized + 'static {
+    type Value = F;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error>
+    {
+        let Some(value) = value.to_str() else {
+            return Err(clap::Error::new(clap::error::ErrorKind::InvalidUtf8));
+        };
+
+        match F::parse(value) {
+            Ok(field) => Ok(field),
+            Err(err) => Err(clap::Error::raw(clap::error::ErrorKind::InvalidValue, err))
+        }
+    }
+}
+
+impl clap::builder::ValueParserFactory for EntryField {
+    type Parser = FieldParser<EntryField>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn value_parser() -> Self::Parser {
+        FieldParser {
+            phantom: PhantomData
+        }
+    }
+}
+
+impl clap::builder::ValueParserFactory for PageField {
+    type Parser = FieldParser<EntryField>;
+
+    #[inline]
+    fn value_parser() -> Self::Parser {
+        FieldParser {
+            phantom: PhantomData
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a str> for EntryField {
+    type Error = ParserError<'a>;
+
+    #[inline]
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -237,9 +304,9 @@ impl Field for EntryField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if let Some((head, tail)) = field.split_once('.') {
-            let map_err = |err: ParserError| ParserError::new(head.len() + 1 + err.index());
+            let map_err = |err: ParserError| ParserError::new(field, head.len() + 1 + err.index());
             if head.eq_ignore_ascii_case("request") {
                 Ok(EntryField::Request(
                     RequestField::parse(tail).map_err(map_err)?
@@ -261,7 +328,7 @@ impl Field for EntryField {
                     InitiatorField::parse(tail).map_err(map_err)?
                 ))
             } else {
-                Err(ParserError::new(0))
+                Err(ParserError::new(field, 0))
             }
         } else if field.eq_ignore_ascii_case("index") {
             Ok(EntryField::Index)
@@ -286,7 +353,7 @@ impl Field for EntryField {
         } else if field.eq_ignore_ascii_case("_fromCache") {
             Ok(EntryField::_FromCache)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -309,11 +376,11 @@ impl std::fmt::Display for InitiatorField {
     }
 }
 
-impl FromStr for InitiatorField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for InitiatorField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -371,7 +438,7 @@ impl Field for InitiatorField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("type") {
             Ok(Self::Type)
         } else if field.eq_ignore_ascii_case("url") {
@@ -379,7 +446,7 @@ impl Field for InitiatorField {
         } else if field.eq_ignore_ascii_case("lineNumber") {
             Ok(Self::LineNumber)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -439,11 +506,11 @@ pub fn get_method_color(method: &str) -> Color {
     }
 }
 
-impl FromStr for RequestField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for RequestField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -552,7 +619,7 @@ impl Field for RequestField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("method") {
             Ok(Self::Method)
         } else if field.eq_ignore_ascii_case("url") {
@@ -580,7 +647,7 @@ impl Field for RequestField {
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -634,11 +701,11 @@ impl std::fmt::Display for ResponseField {
     }
 }
 
-impl FromStr for ResponseField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for ResponseField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -737,15 +804,15 @@ impl Field for ResponseField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if let Some((head, tail)) = field.split_once('.') {
-            let map_err = |err: ParserError| ParserError::new(head.len() + 1 + err.index());
+            let map_err = |err: ParserError| ParserError::new(field, head.len() + 1 + err.index());
             if head.eq_ignore_ascii_case("content") {
                 Ok(ResponseField::Content(
                     ContentField::parse(tail).map_err(map_err)?
                 ))
             } else {
-                Err(ParserError::new(0))
+                Err(ParserError::new(field, 0))
             }
         } else if field.eq_ignore_ascii_case("status") {
             Ok(Self::Status)
@@ -766,7 +833,7 @@ impl Field for ResponseField {
         } else if field.eq_ignore_ascii_case("_fetchedViaServiceWorker") {
             Ok(Self::_FetchedViaServiceWorker)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -794,11 +861,11 @@ impl std::fmt::Display for ContentField {
     }
 }
 
-impl FromStr for ContentField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for ContentField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -880,7 +947,7 @@ impl Field for ContentField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("size") {
             Ok(Self::Size)
         } else if field.eq_ignore_ascii_case("compression") {
@@ -894,7 +961,7 @@ impl Field for ContentField {
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -916,11 +983,11 @@ impl std::fmt::Display for CacheField {
     }
 }
 
-impl FromStr for CacheField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for CacheField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -978,9 +1045,9 @@ impl Field for CacheField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if let Some((head, tail)) = field.split_once('.') {
-            let map_err = |err: ParserError| ParserError::new(head.len() + 1 + err.index());
+            let map_err = |err: ParserError| ParserError::new(field, head.len() + 1 + err.index());
             if head.eq_ignore_ascii_case("beforeRequest") {
                 Ok(CacheField::BeforeRequest(
                     CacheStateField::parse(tail).map_err(map_err)?
@@ -990,12 +1057,12 @@ impl Field for CacheField {
                     CacheStateField::parse(tail).map_err(map_err)?
                 ))
             } else {
-                Err(ParserError::new(0))
+                Err(ParserError::new(field, 0))
             }
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -1021,11 +1088,11 @@ impl std::fmt::Display for CacheStateField {
     }
 }
 
-impl FromStr for CacheStateField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for CacheStateField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -1086,7 +1153,7 @@ impl Field for CacheStateField {
         }
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("expires") {
             Ok(Self::Expires)
         } else if field.eq_ignore_ascii_case("lastAccess") {
@@ -1098,7 +1165,7 @@ impl Field for CacheStateField {
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -1140,11 +1207,11 @@ impl std::fmt::Display for TimingsField {
     }
 }
 
-impl FromStr for TimingsField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for TimingsField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -1251,7 +1318,7 @@ impl Field for TimingsField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("blocked") {
             Ok(Self::Blocked)
         } else if field.eq_ignore_ascii_case("dns") {
@@ -1279,7 +1346,7 @@ impl Field for TimingsField {
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -1307,11 +1374,11 @@ impl std::fmt::Display for PageField {
     }
 }
 
-impl FromStr for PageField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for PageField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -1374,15 +1441,15 @@ impl Field for PageField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if let Some((head, tail)) = field.split_once('.') {
-            let map_err = |err: ParserError| ParserError::new(head.len() + 1 + err.index());
+            let map_err = |err: ParserError| ParserError::new(field, head.len() + 1 + err.index());
             if head.eq_ignore_ascii_case("pageTimings") {
                 Ok(PageField::PageTimings(
                     PageTimingsField::parse(tail).map_err(map_err)?
                 ))
             } else {
-                Err(ParserError::new(0))
+                Err(ParserError::new(field, 0))
             }
         } else if field.eq_ignore_ascii_case("index") {
             Ok(Self::Index)
@@ -1395,7 +1462,7 @@ impl Field for PageField {
         } else if field.eq_ignore_ascii_case("comment") {
             Ok(Self::Comment)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
@@ -1417,11 +1484,11 @@ impl std::fmt::Display for PageTimingsField {
     }
 }
 
-impl FromStr for PageTimingsField {
-    type Err = ParserError;
+impl<'a> TryFrom<&'a str> for PageTimingsField {
+    type Error = ParserError<'a>;
 
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
     }
 }
@@ -1471,7 +1538,7 @@ impl Field for PageTimingsField {
         Ok(())
     }
 
-    fn parse(field: &str) -> Result<Self, ParserError> {
+    fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("OnContentLoad") {
             Ok(Self::OnContentLoad)
         } else if field.eq_ignore_ascii_case("OnLoad") {
@@ -1479,7 +1546,7 @@ impl Field for PageTimingsField {
         } else if field.eq_ignore_ascii_case("Comment") {
             Ok(Self::Comment)
         } else {
-            Err(ParserError::new(0))
+            Err(ParserError::new(field, 0))
         }
     }
 }
