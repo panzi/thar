@@ -402,7 +402,7 @@ impl Widget for Table {
             current_row_index += 1;
         }
 
-        let mut avail_height = height - header_height as u32;
+        let mut avail_height = height - header_height as u32 + scroll_row;
 
         while current_row_index < self.formatted_rows.len() {
             let table_row = &self.formatted_rows[current_row_index];
@@ -418,11 +418,13 @@ impl Widget for Table {
                 ScopedTermIOState::none(scoped_state.termio_mut())
             };
 
+            let offset_body_height = body_height as i32 - scroll_row as i32;
+
             table_row.draw_cropped(
                 scoped_state.termio_mut(),
-                row + header_height as i32 + (body_height as i32 - scroll_row as i32).max(0),
+                row + header_height as i32 + offset_body_height.max(0),
                 column,
-                0,
+                -offset_body_height.min(0) as u32,
                 scroll_column,
                 width,
                 avail_height,
@@ -453,8 +455,12 @@ impl Widget for Table {
                     });
                 }
             }
-            Event::KeyPress { key: Key::Up, alt: false, ctrl: false, shift: false } => {
-                if self.selected_row_index > 0 {
+            &Event::KeyPress { key: Key::Up, alt, ctrl: false, shift: false } => {
+                if alt {
+                    if self.scroll_row > 0 {
+                        self.scroll_row -= 1;
+                    }
+                } else if self.selected_row_index > 0 {
                     self.selected_row_index -= 1;
 
                     self.after_selection_up();
@@ -467,8 +473,13 @@ impl Widget for Table {
                     self.after_selection_up();
                 }
             }
-            Event::KeyPress { key: Key::Down, alt: false, ctrl: false, shift: false } => {
-                if self.formatted_rows.is_empty() {
+            &Event::KeyPress { key: Key::Down, alt, ctrl: false, shift: false } => {
+                if alt {
+                    if self.scroll_row < u32::MAX {
+                        self.scroll_row += 1;
+                        self.clamp_scroll();
+                    }
+                } else if self.formatted_rows.is_empty() {
                     self.selected_row_index = 0;
                     self.scroll_row = 0;
                 } else if self.selected_row_index < self.formatted_rows.len() - 1 {
@@ -488,7 +499,6 @@ impl Widget for Table {
             Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
                 if self.scroll_column > 0 {
                     self.scroll_column -= 1;
-                    self.clamp_scroll();
                 }
             }
             Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
