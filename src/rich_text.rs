@@ -579,7 +579,7 @@ impl RichText {
                 return Ok(());
             }
 
-            if row as usize + crop_row_end > window_size.rows as usize {
+            if row as usize + (crop_row_end - crop_row) > window_size.rows as usize {
                 crop_row_end = window_size.rows as usize + crop_row - row as usize;
             }
             term_row = row as u32;
