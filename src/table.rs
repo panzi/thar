@@ -111,7 +111,10 @@ fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText, ot
         right_pad_line_with(self_line, actual_line_width, wanted_line_width);
     }
 
-    formatted.width = columns.len() + columns.iter().map(Column::width).sum::<usize>();
+    formatted.width = columns.iter().map(Column::width).sum::<usize>();
+    if !columns.is_empty() {
+        formatted.width += columns.len() - 1;
+    }
     formatted.height()
 }
 
