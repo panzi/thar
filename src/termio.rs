@@ -1,6 +1,6 @@
 use std::{io::{BufWriter, ErrorKind, Write}, mem::MaybeUninit, os::fd::RawFd, sync::atomic::{AtomicU32, Ordering}};
 
-use crate::{borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key, MOUSE_MASK_ALT, MOUSE_MASK_CTRL, MOUSE_MASK_MOVE, MOUSE_MASK_SHIFT, MOUSE_MASK_UNKNOWN, MOUSE_MASK_WHEEL, MouseButton}, style::{FontStyle, FontWeight, TextDecoration}};
+use crate::{ansi_codes::{BG_DEFAULT, BOLD, CLEAR_LINE, CLEAR_LINE_TO_END, CLEAR_LINE_TO_START, CLEAR_SCREEN, CLEAR_STYLE, DOUBLY_UNDERLINE, FAINT, FG_DEFAULT, ITALIC, NORMAL_INTENSITY, NOT_ITALIC, NOT_UNDERLINE, UNDERLINE}, borrowed_fd::BorrowedFd, color::{Color, Color16, Rgb}, epoll::{EPoll, Events}, event::{ESCAPE, ESCAPE_EVENT, Event, Key, MOUSE_MASK_ALT, MOUSE_MASK_CTRL, MOUSE_MASK_MOVE, MOUSE_MASK_SHIFT, MOUSE_MASK_UNKNOWN, MOUSE_MASK_WHEEL, MouseButton}, style::{FontStyle, FontWeight, TextDecoration}};
 
 // if konsole would support this, that would be so much nicer: https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83
 static SIGWINCH_NR: AtomicU32 = AtomicU32::new(0);
@@ -45,9 +45,6 @@ impl std::fmt::Display for WindowSize {
         write!(f, "{}x{}", self.columns, self.rows)
     }
 }
-
-pub const FG_DEFAULT: &[u8] = b"\x1B[39m";
-pub const BG_DEFAULT: &[u8] = b"\x1B[49m";
 
 impl TermIO {
     #[inline]
@@ -297,47 +294,47 @@ impl TermIO {
 
     #[inline]
     pub fn clear_style(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[0m")
+        self.writer.write_all(CLEAR_STYLE)
     }
 
     #[inline]
     pub fn bold(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[1m")
+        self.writer.write_all(BOLD)
     }
 
     #[inline]
     pub fn faint(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[2m")
+        self.writer.write_all(FAINT)
     }
 
     #[inline]
     pub fn italic(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[3m")
+        self.writer.write_all(ITALIC)
     }
 
     #[inline]
     pub fn not_italic(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[23m")
+        self.writer.write_all(NOT_ITALIC)
     }
 
     #[inline]
     pub fn underline(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[4m")
+        self.writer.write_all(UNDERLINE)
     }
 
     #[inline]
     pub fn doubly_underline(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[21m")
+        self.writer.write_all(DOUBLY_UNDERLINE)
     }
 
     #[inline]
     pub fn normal_intensity(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[22m")
+        self.writer.write_all(NORMAL_INTENSITY)
     }
 
     #[inline]
     pub fn not_underline(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[24m")
+        self.writer.write_all(NOT_UNDERLINE)
     }
 
     pub fn font_weight(&mut self, font_weight: FontWeight) -> std::io::Result<()> {
@@ -405,22 +402,22 @@ impl TermIO {
 
     #[inline]
     pub fn clear_screen(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[2J")
+        self.writer.write_all(CLEAR_SCREEN)
     }
 
     #[inline]
     pub fn clear_line(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[2K")
+        self.writer.write_all(CLEAR_LINE)
     }
 
     #[inline]
     pub fn clear_line_to_end(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[0K")
+        self.writer.write_all(CLEAR_LINE_TO_END)
     }
 
     #[inline]
     pub fn clear_line_to_start(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(b"\x1B[1K")
+        self.writer.write_all(CLEAR_LINE_TO_START)
     }
 
     pub fn read_byte(&mut self) -> std::io::Result<Option<u8>> {

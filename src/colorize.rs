@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}};
+use crate::{color::Color, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}};
 
 fn skipws(text: &str, index: usize) -> usize {
     let Some(sub_index) = text[index..].find(|ch: char| !ch.is_whitespace()) else {
@@ -42,7 +42,7 @@ const KEYWORD_STYLE: RichTextStyle = RichTextStyle {
 };
 
 const STRING_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0xFF2200),
+    foreground: Color::from_u32(0xFF5500),
     ..DEFAULT_STYLE
 };
 
@@ -53,6 +53,21 @@ const ESCAPE_STYLE: RichTextStyle = RichTextStyle {
 
 const COMMENT_STYLE: RichTextStyle = RichTextStyle {
     foreground: Color::from_u32(0xAAAAAA),
+    ..DEFAULT_STYLE
+};
+
+const DOCTYPE_STYLE: RichTextStyle = RichTextStyle {
+    foreground: Color::from_u32(0x00FF00),
+    ..DEFAULT_STYLE
+};
+
+const TAG_STYLE: RichTextStyle = RichTextStyle {
+    foreground: Color::from_u32(0xFFAA00),
+    ..DEFAULT_STYLE
+};
+
+const ATTR_STYLE: RichTextStyle = RichTextStyle {
+    foreground: Color::from_u32(0x00AAFF),
     ..DEFAULT_STYLE
 };
 
@@ -85,7 +100,7 @@ fn colorize_string(text: &str, mut index: usize, rich_text: &mut RichText) -> us
                 };
 
                 match ch {
-                    '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' => {
+                    '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | '"' => {
                         index += 1;
                         rich_text.append_text(&ESCAPE_STYLE, &text[prev..index]);
                     }
@@ -294,47 +309,365 @@ fn find_sgml_start(sgml: &str, index: usize) -> usize {
     index + sub_index
 }
 
-pub fn colorize_sgml(sgml: &str, rich_text: &mut RichText) {
-    let mut prev = 0;
-    let mut index = find_sgml_start(sgml, 0);
+fn find_nested_angle_end(sgml: &str, index: usize) -> Option<usize> {
+    let mut nesting = 1;
+    for (sub_index, ch) in sgml[index..].char_indices() {
+        match ch {
+            '>' => {
+                nesting -= 1;
+                if nesting == 0 {
+                    return Some(index + sub_index + 1);
+                }
+            }
+            '<' => {
+                nesting += 1;
+            }
+            _ => {}
+        }
+    }
 
-    loop {
+    None
+}
+
+pub fn colorize_sgml(sgml: &str, rich_text: &mut RichText) {
+    let mut index = 0;
+
+    while index < sgml.len() {
+        let mut prev = index;
+        index = find_sgml_start(sgml, index);
+
         if index > prev {
             rich_text.append_plain_text(&sgml[prev..index]);
         }
         prev = index;
 
+        if index >= sgml.len() {
+            break;
+        }
+
+        const CDATA_START: &str = "<![CDATA[";
+        const CDATA_END: &str = "]]>";
+        const COMMENT_START: &str = "<!--";
+        const COMMENT_END: &str = "-->";
+        const DOCTYPE_START: &str = "<!DOCTYPE";
+        const PI_START: &str = "<?";
+        const PI_END: &str = "?>";
+
         let suffix = &sgml[index..];
-        if suffix.starts_with("<![CDATA[") {
+        if suffix.starts_with(CDATA_START) {
             // CDATA section
-            index += "<![CDATA[".len();
-            let Some(sub_index) = sgml[index..].find("]]>") else {
+            index += CDATA_START.len();
+            let Some(sub_index) = sgml[index..].find(CDATA_END) else {
                 rich_text.append_text(&ERROR_STYLE, &sgml[prev..]);
                 return;
             };
-            index += sub_index;
+            let end_index = index + sub_index;
+
             rich_text.append_text(&COMMENT_STYLE, &sgml[prev..index]);
-        } else if suffix.starts_with("<!--") {
+            prev = index;
+            index = end_index;
+            rich_text.append_plain_text(&sgml[prev..index]);
+            prev = index;
+            index += CDATA_END.len();
+            rich_text.append_text(&COMMENT_STYLE, &sgml[prev..index]);
+        } else if suffix.starts_with(COMMENT_START) {
             // comment
-            index += "<!--".len();
-            let Some(sub_index) = sgml[index..].find("-->") else {
+            index += COMMENT_START.len();
+            let Some(sub_index) = sgml[index..].find(COMMENT_END) else {
                 rich_text.append_text(&COMMENT_STYLE, &sgml[prev..]);
                 return;
             };
-            index += sub_index;
+            index += sub_index + COMMENT_END.len();
             rich_text.append_text(&COMMENT_STYLE, &sgml[prev..index]);
-        } else if suffix.starts_with("<!DOCTYPE") {
-            // TODO: DOCTYPE
-        } else if suffix.starts_with("<?") {
-            // TODO: processing instructions
+        } else if suffix.len() > DOCTYPE_START.len() &&
+            suffix[..DOCTYPE_START.len()].eq_ignore_ascii_case(DOCTYPE_START) &&
+            suffix[DOCTYPE_START.len()..].starts_with(|ch: char| !ch.is_alphanumeric() && ch != '_' && ch != '-') {
+            // DOCTYPE
+            index += DOCTYPE_START.len();
+            let Some(next_index) = find_nested_angle_end(sgml, index) else {
+                rich_text.append_text(&ERROR_STYLE, &sgml[prev..]);
+                return;
+            };
+
+            index = next_index;
+            rich_text.append_text(&DOCTYPE_STYLE, &sgml[prev..index]);
+        } else if suffix.starts_with("<!") {
+            // error
+            index += 2;
+            let Some(next_index) = find_nested_angle_end(sgml, index) else {
+                rich_text.append_text(&ERROR_STYLE, &sgml[prev..]);
+                return;
+            };
+
+            index = next_index;
+            rich_text.append_text(&ERROR_STYLE, &sgml[prev..index]);
+        } else if suffix.starts_with(PI_START) {
+            // processing instructions
+            index += PI_START.len();
+            rich_text.append_text(&SYMBOL_STYLE, &sgml[prev..index]);
+
+            prev = index;
+            index = find_word_end(sgml, index);
+
+            rich_text.append_text(&TAG_STYLE, &sgml[prev..index]);
+
+            index = parse_attributes(sgml, index, rich_text);
+            prev = index;
+
+            if sgml[index..].starts_with(PI_END) {
+                index += PI_END.len();
+                rich_text.append_text(&SYMBOL_STYLE, &sgml[prev..index]);
+            } else if let Some(ch) = sgml[index..].chars().next() {
+                index += ch.len_utf8();
+                rich_text.append_text(&ERROR_STYLE, &sgml[prev..index]);
+            }
+        } else if suffix.starts_with("</") {
+            // end tag
+            index += "</".len();
+            rich_text.append_text(&SYMBOL_STYLE, &sgml[prev..index]);
+
+            prev = index;
+            index = find_word_end(sgml, index);
+
+            rich_text.append_text(&TAG_STYLE, &sgml[prev..index]);
+
+            prev = index;
+            index = skipws(sgml, index);
+
+            if prev < index {
+                rich_text.append_plain_text(&sgml[prev..index]);
+                prev = index;
+            }
+
+            if sgml[index..].starts_with('>') {
+                index += 1;
+                rich_text.append_text(&SYMBOL_STYLE, &sgml[prev..index]);
+            } else if let Some(ch) = sgml[index..].chars().next() {
+                index += ch.len_utf8();
+                rich_text.append_text(&ERROR_STYLE, &sgml[prev..index]);
+            }
         } else if suffix.starts_with('<') {
-            // TODO: tags
+            // start tag
+            index += 1;
+            rich_text.append_text(&SYMBOL_STYLE, &sgml[prev..index]);
+
+            prev = index;
+            index = find_word_end(sgml, index);
+
+            rich_text.append_text(&TAG_STYLE, &sgml[prev..index]);
+
+            index = parse_attributes(sgml, index, rich_text);
+            prev = index;
+
+            if sgml[index..].starts_with('>') {
+                index += 1;
+                rich_text.append_text(&SYMBOL_STYLE, &sgml[prev..index]);
+            } else if sgml[index..].starts_with("/>") {
+                index += 2;
+                rich_text.append_text(&SYMBOL_STYLE, &sgml[prev..index]);
+            } else if let Some(ch) = sgml[index..].chars().next() {
+                index += ch.len_utf8();
+                rich_text.append_text(&ERROR_STYLE, &sgml[prev..index]);
+            }
         } else {
             // &
-            // TODO: entity reference
+            // entity reference
+            if let Some(next_index) = parse_entity_ref(sgml, index) {
+                index = next_index;
+                rich_text.append_text(&KEYWORD_STYLE, &sgml[prev..index]);
+            } else {
+                index += 1;
+                rich_text.append_text(&ERROR_STYLE, &sgml[prev..index]);
+            }
+        }
+    }
+}
+
+fn find_word_end(sgml: &str, index: usize) -> usize {
+    let Some(sub_index) = sgml[index..].find(|ch: char| !ch.is_alphanumeric() && ch != '_' && ch != '-' && ch != ':') else {
+        return sgml.len();
+    };
+
+    index + sub_index
+}
+
+fn parse_attributes(sgml: &str, mut index: usize, rich_text: &mut RichText) -> usize {
+    let mut prev = index;
+
+    loop {
+        index = skipws(sgml, index);
+
+        if prev < index {
+            rich_text.append_plain_text(&sgml[prev..index]);
         }
 
         prev = index;
-        index = find_sgml_start(sgml, index);
+
+        if !sgml[index..].starts_with(|ch: char| ch.is_alphanumeric() || ch == '_' || ch == '-') {
+            return index;
+        }
+
+        index = find_word_end(sgml, index);
+
+        rich_text.append_text(&ATTR_STYLE, &sgml[prev..index]);
+
+        prev = index;
+        index = skipws(sgml, index);
+
+        if prev < index {
+            rich_text.append_plain_text(&sgml[prev..index]);
+            prev = index;
+        }
+
+        if sgml[index..].starts_with('=') {
+            index += 1;
+
+            rich_text.append_text(&SYMBOL_STYLE, &sgml[prev..index]);
+
+            prev = index;
+            index = skipws(sgml, index);
+
+            if prev < index {
+                rich_text.append_plain_text(&sgml[prev..index]);
+                prev = index;
+            }
+
+            let suffix = &sgml[index..];
+            if suffix.starts_with(|ch: char| ch.is_alphanumeric() || ch == '_' || ch == '-') {
+                index = find_plain_attr_value_end(sgml, index);
+
+                rich_text.append_text(&STRING_STYLE, &sgml[prev..index]);
+            } else if suffix.starts_with('"') {
+                index = parse_attr_value(sgml, index, '"', rich_text);
+            } else if suffix.starts_with('\'') {
+                index = parse_attr_value(sgml, index, '\'', rich_text);
+            } else {
+                return index;
+            }
+        }
+
+        prev = index;
     }
+}
+
+fn find_plain_attr_value_end(sgml: &str, index: usize) -> usize {
+    // TODO: entity refs in unquoted attributes?
+    let Some(sub_index) = sgml[index..].find(|ch: char| ch.is_whitespace() || ch == '>' || ch == '<' || ch == '"' || ch == '\'') else {
+        return sgml.len();
+    };
+
+    index + sub_index
+}
+
+fn parse_attr_value(sgml: &str, mut index: usize, quote: char, rich_text: &mut RichText) -> usize {
+    let mut prev = index;
+
+    if !sgml[index..].starts_with(quote) {
+        return sgml.len();
+    }
+
+    index += 1;
+
+    loop {
+        let Some(sub_index) = sgml[index..].find(|ch: char| ch == '&' || ch == quote) else {
+            rich_text.append_text(&ERROR_STYLE, &sgml[index..]);
+            return sgml.len();
+        };
+        index += sub_index;
+
+        if prev < index {
+            rich_text.append_text(&STRING_STYLE, &sgml[prev..index]);
+            prev = index;
+        }
+
+        let Some(ch) = sgml[index..].chars().next() else {
+            rich_text.append_text(&ERROR_STYLE, &sgml[index..]);
+            return sgml.len();
+        };
+
+        if ch == '&' {
+            let Some(next_index) = parse_entity_ref(sgml, index) else {
+                rich_text.append_text(&ERROR_STYLE, &sgml[index..]);
+                return sgml.len();
+            };
+            index = next_index;
+            rich_text.append_text(&KEYWORD_STYLE, &sgml[prev..index]);
+        } else {
+            index += 1;
+            rich_text.append_text(&STRING_STYLE, &sgml[prev..index]);
+            return index;
+        }
+        prev = index;
+    }
+}
+
+fn parse_entity_ref(sgml: &str, mut index: usize) -> Option<usize> {
+    let Some(ch) = sgml[index..].chars().next() else {
+        return None;
+    };
+
+    if ch != '&' {
+        return None;
+    }
+
+    index += 1;
+    let Some(mut ch) = sgml[index..].chars().next() else {
+        return None;
+    };
+
+    if ch == '#' {
+        index += 1;
+        let Some(next_ch) = sgml[index..].chars().next() else {
+            return None;
+        };
+        ch = next_ch;
+
+        if ch.eq_ignore_ascii_case(&'x') {
+            index += 1;
+            let Some(next_ch) = sgml[index..].chars().next() else {
+                return None;
+            };
+            ch = next_ch;
+
+            if !ch.is_ascii_hexdigit() {
+                return None;
+            }
+
+            while ch.is_ascii_hexdigit() {
+                index += 1;
+                let Some(next_ch) = sgml[index..].chars().next() else {
+                    return None;
+                };
+                ch = next_ch;
+            }
+        } else if ch.is_ascii_digit() {
+            while ch.is_ascii_digit() {
+                index += 1;
+                let Some(next_ch) = sgml[index..].chars().next() else {
+                    return None;
+                };
+                ch = next_ch;
+            }
+        } else {
+            return None;
+        }
+    } else if ch.is_alphanumeric() || ch == '_' {
+        while ch.is_alphanumeric() || ch == '_' {
+            index += 1;
+            let Some(next_ch) = sgml[index..].chars().next() else {
+                return None;
+            };
+            ch = next_ch;
+        }
+    } else {
+        return None;
+    }
+
+    if ch != ';' {
+        return None;
+    }
+
+    index += 1;
+
+    Some(index)
 }

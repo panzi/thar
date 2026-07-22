@@ -1,4 +1,4 @@
-use crate::{char_width::CharWidth, color::{Color, Color16}, colorize::colorize_json, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
+use crate::{char_width::CharWidth, color::{Color, Color16}, colorize::{colorize_json, colorize_sgml}, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
 
 use std::{fmt::Write, marker::PhantomData};
 
@@ -921,7 +921,8 @@ impl Field for ContentField {
 
                         if mime_type == "text/html" || mime_type.ends_with("+xml") {
                             // TODO
-                            rich_text.append_plain_text(text);
+                            //rich_text.append_plain_text(text);
+                            colorize_sgml(text, rich_text);
                         } else if mime_type == "application/json" || mime_type.ends_with("+json") {
                             colorize_json(text, rich_text);
                         } else {

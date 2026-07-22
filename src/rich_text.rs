@@ -1,4 +1,4 @@
-use crate::{char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration}, termio::TermIO};
+use crate::{ansi_codes::{BOLD, DOUBLY_UNDERLINE, FAINT, ITALIC, NORMAL_INTENSITY, NOT_ITALIC, NOT_UNDERLINE, UNDERLINE, write_bg, write_fg}, char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration}, termio::TermIO};
 
 /// Simple rich text format, a bit like BB code.
 /// 
@@ -672,6 +672,47 @@ impl RichText {
                     }
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    pub fn print(&self, write: &mut impl std::io::Write) -> std::io::Result<()> {
+        for line in &self.lines {
+            for item in line {
+                match item {
+                    RichTextCode::FontWeight(font_weight) => {
+                        match font_weight {
+                            FontWeight::Normal => write.write_all(NORMAL_INTENSITY)?,
+                            FontWeight::Bold => write.write_all(BOLD)?,
+                            FontWeight::Faint => write.write_all(FAINT)?,
+                        }
+                    }
+                    RichTextCode::FontStyle(font_style) => {
+                        match font_style {
+                            FontStyle::Normal => write.write_all(NOT_ITALIC)?,
+                            FontStyle::Italic => write.write_all(ITALIC)?,
+                        }
+                    }
+                    RichTextCode::TextDecoration(text_decoration) => {
+                        match text_decoration {
+                            TextDecoration::None => write.write_all(NOT_UNDERLINE)?,
+                            TextDecoration::Underline => write.write_all(UNDERLINE)?,
+                            TextDecoration::DoublyUnderline => write.write_all(DOUBLY_UNDERLINE)?,
+                        }
+                    }
+                    &RichTextCode::Foreground(color) => {
+                        write_fg(write, color)?;
+                    }
+                    &RichTextCode::Background(color) => {
+                        write_bg(write, color)?;
+                    }
+                    RichTextCode::Text { text, .. } => {
+                        write.write_all(text.as_bytes())?;
+                    }
+                }
+            }
+            write.write_all(b"\n")?;
         }
 
         Ok(())
