@@ -1,4 +1,4 @@
-use crate::{color::Color, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::RichText, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{Widget, WidgetId, next_widget_id}};
+use crate::{color::Color, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle, line_width, right_pad_line_with}, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{Widget, WidgetId, next_widget_id}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
@@ -42,43 +42,77 @@ fn gather_widths(columns: &mut Vec<Column>, row: &[RichText]) {
     }
 }
 
-fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText) -> usize {
-    let mut height = 0;
-
-    for cell in row {
-        if cell.height() > height {
-            height = cell.height();
-        }
-    }
-
-    formatted.append_lines(height);
-
+fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText, other_styles: &mut Vec<RichTextStyle>) -> usize {
     if columns.is_empty() {
-        return 0;
+        formatted.bottom_pad(1);
+        return formatted.height();
     }
 
-    let last_index = columns.len() - 1;
-    let mut width = 0;
-    for (index, (column, cell)) in columns.iter().zip(row.iter()).enumerate() {
-        if column.align.is_left() {
-            width += column.width() + (index != last_index) as usize;
-            formatted.vertical_append(cell);
-            formatted.right_pad(width);
+    let max_lines = row.iter()
+        .map(RichText::height)
+        .max()
+        .unwrap_or(0)
+        .max(1);
+
+    formatted.bottom_pad(max_lines);
+
+    let other_styles_len = other_styles.len();
+    other_styles[..columns.len().min(other_styles_len)].fill(DEFAULT_STYLE);
+    other_styles.resize(columns.len(), DEFAULT_STYLE);
+
+    let mut self_style = DEFAULT_STYLE;
+
+    for line_index in 0..max_lines {
+        let self_line = if let Some(self_line) = formatted.lines.get_mut(line_index) {
+            self_style.apply_changes(self_line);
+            self_line
         } else {
-            let mut cell = cell.clone();
-            cell.bottom_pad(formatted.height());
-            cell.left_pad(column.width());
+            formatted.lines.push_mut(Vec::new())
+        };
 
-            formatted.vertical_append(&cell);
+        self_line.reserve(
+            row.len() +
+            row.iter()
+            .map(|other|
+                other.lines.get(line_index)
+                .map_or(0, Vec::len)
+            ).sum::<usize>()
+        );
 
-            if index != last_index {
-                width += column.width() + 1;
-                formatted.right_pad(width);
+        let mut actual_line_width = line_width(self_line);
+        let mut wanted_line_width = actual_line_width;
+        let mut prev_style = &self_style;
+
+        for ((other, other_style), column) in row.iter().zip(&mut other_styles[..]).zip(columns) {
+            prev_style.diff(&other_style, self_line);
+
+            wanted_line_width += 1;
+
+            let column_width = column.width();
+            if let Some(other_line) = other.lines.get(line_index) {
+                let mut pad_width = wanted_line_width;
+                let other_width = line_width(other_line);
+                if column.align().is_right() {
+                    if other_width < column_width {
+                        pad_width += column_width - other_width;
+                    }
+                }
+                right_pad_line_with(self_line, actual_line_width, pad_width);
+                actual_line_width = pad_width;
+                self_line.extend_from_slice(&other_line);
+                actual_line_width += other_width;
+                other_style.apply_changes(other_line);
             }
+            wanted_line_width += column_width;
+
+            prev_style = other_style;
         }
+
+        right_pad_line_with(self_line, actual_line_width, wanted_line_width);
     }
 
-    height
+    formatted.width = columns.len() + columns.iter().map(Column::width).sum::<usize>();
+    formatted.height()
 }
 
 impl Default for Table {
@@ -205,12 +239,13 @@ impl Table {
             gather_widths(&mut self.columns, row);
         }
 
+        let mut style_buf = Vec::new();
         self.formatted_rows.reserve(1 + self.rows.len());
-        self.header_height = format_row(&self.columns, &self.header, &mut self.formatted_header);
+        self.header_height = format_row(&self.columns, &self.header, &mut self.formatted_header, &mut style_buf);
 
         self.rows_height = 0;
         for row in &self.rows {
-            self.rows_height += format_row(&self.columns, row, self.formatted_rows.push_mut(RichText::new()));
+            self.rows_height += format_row(&self.columns, row, self.formatted_rows.push_mut(RichText::new()), &mut style_buf);
         }
 
         self.width = self.columns.iter().map(Column::width).sum();

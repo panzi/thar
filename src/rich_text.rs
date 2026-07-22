@@ -17,15 +17,15 @@ use crate::{ansi_codes::{BOLD, DOUBLY_UNDERLINE, FAINT, ITALIC, NORMAL_INTENSITY
 /// * `]]` a single close bracket (`]`)
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct RichText {
-    lines: Vec<Vec<RichTextCode>>,
-    width: usize,
+    pub(super) lines: Vec<Vec<RichTextCode>>,
+    pub(super) width: usize,
 }
 
 pub fn line_width(line: &[RichTextCode]) -> usize {
     let mut line_width = 0;
 
     for code in line {
-        if let RichTextCode::Text { text: _, width } = code {
+        if let RichTextCode::Text { width, .. } = code {
             line_width += width;
         }
     }
@@ -716,6 +716,26 @@ impl RichText {
         }
 
         Ok(())
+    }
+}
+
+pub fn right_pad_line(line: &mut Vec<RichTextCode>, width: usize) {
+    right_pad_line_with(line, line_width(line), width);
+}
+
+pub(super) fn right_pad_line_with(line: &mut Vec<RichTextCode>, line_width: usize, width: usize) {
+    if line_width < width {
+        let extra_width = width - line_width;
+        if let Some(RichTextCode::Text { text, width: text_width }) = line.last_mut() {
+            text.reserve(extra_width);
+            for _ in 0..extra_width {
+                text.push(' ');
+            }
+            *text_width += extra_width;
+        } else {
+            let text = " ".repeat(extra_width);
+            line.push(RichTextCode::Text { text, width: extra_width });
+        }
     }
 }
 
