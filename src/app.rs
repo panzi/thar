@@ -37,26 +37,26 @@ impl App {
 
         let mut buf = String::new();
 
-        for (index, entry) in har.log.entries.iter().enumerate() {
+        for entry in &har.log.entries {
             let mut row = Vec::new();
             for column in config.request_columns {
                 buf.clear();
 
                 let mut cell = RichText::new();
-                column.write_rich_text(index, entry, &mut cell, &mut buf).unwrap();
+                column.write_rich_text(entry, &mut cell, &mut buf).unwrap();
 
                 row.push(cell);
             }
             requests_table.rows_mut().push(row);
         }
 
-        for (index, page) in har.log.pages.iter().enumerate() {
+        for page in &har.log.pages {
             let mut row = Vec::new();
             for column in config.page_columns {
                 buf.clear();
 
                 let mut cell = RichText::new();
-                column.write_rich_text(index, page, &mut cell, &mut buf).unwrap();
+                column.write_rich_text(page, &mut cell, &mut buf).unwrap();
 
                 row.push(cell);
             }

@@ -7,8 +7,8 @@ pub trait Field: Sized + std::fmt::Display {
 
     fn header(&self) -> &str;
     fn align(&self) -> Align;
-    fn write_rich_text(&self, index: usize, value: &Self::Value, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result;
-    fn compare(&self, lhs_index: usize, lhs: &Self::Value, rhs_index: usize, rhs: &Self::Value) -> Ordering;
+    fn write_rich_text(&self, value: &Self::Value, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result;
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering;
 
     #[inline]
     fn to_column_def(&self) -> ColumnDef {
@@ -94,7 +94,7 @@ pub enum EntryField {
 impl std::fmt::Display for EntryField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Index            => "index".fmt(f),
+            Self::Index            => "_index".fmt(f),
             Self::StartedDateTime  => "startedDateTime".fmt(f),
             Self::Time             => "time".fmt(f),
             Self::Request(req)     => write!(f, "request.{req}"),
@@ -219,10 +219,10 @@ impl Field for EntryField {
         }
     }
 
-    fn write_rich_text(&self, index: usize, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, entry: &Entry, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Index => {
-                write!(buf, "{index}")?;
+                write!(buf, "{}", entry._index)?;
                 rich_text.append_plain_text(buf);
             }
             Self::StartedDateTime => {
@@ -234,21 +234,21 @@ impl Field for EntryField {
                 rich_text.append_plain_text(buf);
             }
             Self::Request(req) => {
-                req.write_rich_text(0, &entry.request, rich_text, buf)?;
+                req.write_rich_text(&entry.request, rich_text, buf)?;
             }
             Self::Response(res) => {
                 if let Some(response) = &entry.response {
-                    res.write_rich_text(0, response, rich_text, buf)?;
+                    res.write_rich_text(response, rich_text, buf)?;
                 }
             }
             Self::Cache(cache) => {
                 if let Some(value) = &entry.cache {
-                    cache.write_rich_text(0, value, rich_text, buf)?;
+                    cache.write_rich_text(value, rich_text, buf)?;
                 }
             }
             Self::Timings(timings) => {
                 if let Some(value) = &entry.timings {
-                    timings.write_rich_text(0, value, rich_text, buf)?;
+                    timings.write_rich_text(value, rich_text, buf)?;
                 }
             }
             Self::ServerIpAddress => {
@@ -279,7 +279,7 @@ impl Field for EntryField {
             }
             Self::_Initiator(init) => {
                 if let Some(value) = &entry._initiator {
-                    init.write_rich_text(0, value, rich_text, buf)?;
+                    init.write_rich_text(value, rich_text, buf)?;
                 }
             }
             Self::_Priority => {
@@ -305,10 +305,10 @@ impl Field for EntryField {
         Ok(())
     }
 
-    fn compare(&self, lhs_index: usize, lhs: &Self::Value, rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::Index => {
-                lhs_index.cmp(&rhs_index)
+                lhs._index.cmp(&rhs._index)
             }
             Self::StartedDateTime => {
                 lhs.started_date_time.cmp(&rhs.started_date_time)
@@ -317,7 +317,7 @@ impl Field for EntryField {
                 cmp_f64(lhs.time, rhs.time)
             }
             Self::Request(req) => {
-                req.compare(0, &lhs.request, 0, &rhs.request)
+                req.compare(&lhs.request, &rhs.request)
             }
             Self::Response(res) => {
                 cmp_opt_field(res, &lhs.response, &rhs.response)
@@ -384,7 +384,7 @@ impl Field for EntryField {
             } else {
                 Err(ParserError::new(field, 0))
             }
-        } else if field.eq_ignore_ascii_case("index") {
+        } else if field.eq_ignore_ascii_case("_index") {
             Ok(EntryField::Index)
         } else if field.eq_ignore_ascii_case("startedDateTime") {
             Ok(EntryField::StartedDateTime)
@@ -460,7 +460,7 @@ impl Field for InitiatorField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, init: &Initiator, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, init: &Initiator, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Type => {
                 rich_text.append_plain_text(init.type_name())
@@ -482,7 +482,7 @@ impl Field for InitiatorField {
         Ok(())
     }
 
-    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::Type => {
                 lhs.type_name().cmp(rhs.type_name())
@@ -614,7 +614,7 @@ impl Field for RequestField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, request: &Request, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, request: &Request, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Method => {
                 let style = RichTextStyle::build().foreground(get_method_color(&request.method)).into_inner();
@@ -677,7 +677,7 @@ impl Field for RequestField {
         Ok(())
     }
 
-    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::Method => {
                 lhs.method.cmp(&rhs.method)
@@ -852,7 +852,7 @@ impl Field for ResponseField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, response: &Response, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, response: &Response, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Status => {
                 let style = RichTextStyle::build().foreground(get_staus_color(response.status)).into();
@@ -871,7 +871,7 @@ impl Field for ResponseField {
             },
             Self::Content(content) => {
                 if let Some(value) = &response.content {
-                    content.write_rich_text(0, value, rich_text, buf)?;
+                    content.write_rich_text(value, rich_text, buf)?;
                 }
             },
             Self::HeadersSize => {
@@ -906,7 +906,7 @@ impl Field for ResponseField {
         Ok(())
     }
 
-    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::Status => {
                 lhs.status.cmp(&rhs.status)
@@ -1034,7 +1034,7 @@ impl Field for ContentField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, content: &Content, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, content: &Content, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Size => {
                 write!(buf, "{}", content.size)?;
@@ -1085,7 +1085,7 @@ impl Field for ContentField {
         Ok(())
     }
 
-    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::Size => {
                 lhs.size.cmp(&rhs.size)
@@ -1184,16 +1184,16 @@ impl Field for CacheField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, cache: &Cache, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, cache: &Cache, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::BeforeRequest(state_field) => {
                 if let Some(state) = &cache.before_request {
-                    state_field.write_rich_text(0, state, rich_text, buf)?;
+                    state_field.write_rich_text(state, rich_text, buf)?;
                 }
             },
             Self::AfterRequest(state_field) => {
                 if let Some(state) = &cache.after_request {
-                    state_field.write_rich_text(0, state, rich_text, buf)?;
+                    state_field.write_rich_text(state, rich_text, buf)?;
                 }
             },
             Self::Comment => {
@@ -1206,7 +1206,7 @@ impl Field for CacheField {
         Ok(())
     }
 
-    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::BeforeRequest(state_field) => {
                 cmp_opt_field(state_field, &lhs.before_request, &rhs.before_request)
@@ -1275,7 +1275,7 @@ impl<'a> TryFrom<&'a str> for CacheStateField {
 impl Field for CacheStateField {
     type Value = CacheState;
 
-    fn write_rich_text(&self, _index: usize, state: &CacheState, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, state: &CacheState, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Expires => {
                 if let Some(expires) = &state.expires {
@@ -1306,7 +1306,7 @@ impl Field for CacheStateField {
         Ok(())
     }
 
-    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::Expires => {
                 cmp_opt(&lhs.expires, &rhs.expires)
@@ -1452,7 +1452,7 @@ impl Field for TimingsField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, timings: &Timings, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, timings: &Timings, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Blocked => {
                 write!(buf, "{}", timings.blocked)?;
@@ -1513,7 +1513,7 @@ impl Field for TimingsField {
         Ok(())
     }
 
-    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::Blocked => {
                 cmp_f64(lhs.blocked, rhs.blocked)
@@ -1604,7 +1604,7 @@ pub enum PageField {
 impl std::fmt::Display for PageField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Index           => "index".fmt(f),
+            Self::Index           => "_index".fmt(f),
             Self::StartedDateTime => "startedDateTime".fmt(f),
             Self::Id              => "id".fmt(f),
             Self::Title           => "title".fmt(f),
@@ -1650,10 +1650,10 @@ impl Field for PageField {
         }
     }
 
-    fn write_rich_text(&self, index: usize, page: &Page, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, page: &Page, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Index => {
-                write!(buf, "{index}")?;
+                write!(buf, "{}", page._index)?;
                 rich_text.append_plain_text(buf);
             }
             Self::StartedDateTime => {
@@ -1668,7 +1668,7 @@ impl Field for PageField {
             }
             Self::PageTimings(timings) => {
                 if let Some(value) = &page.page_timings {
-                    timings.write_rich_text(0, value, rich_text, buf)?;
+                    timings.write_rich_text(value, rich_text, buf)?;
                 }
             }
             Self::Comment => {
@@ -1681,10 +1681,10 @@ impl Field for PageField {
         Ok(())
     }
 
-    fn compare(&self, lhs_index: usize, lhs: &Self::Value, rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::Index => {
-                lhs_index.cmp(&rhs_index)
+                lhs._index.cmp(&rhs._index)
             }
             Self::StartedDateTime => {
                 lhs.started_date_time.cmp(&rhs.started_date_time)
@@ -1714,7 +1714,7 @@ impl Field for PageField {
             } else {
                 Err(ParserError::new(field, 0))
             }
-        } else if field.eq_ignore_ascii_case("index") {
+        } else if field.eq_ignore_ascii_case("_index") {
             Ok(Self::Index)
         } else if field.eq_ignore_ascii_case("startedDateTime") {
             Ok(Self::StartedDateTime)
@@ -1777,7 +1777,7 @@ impl Field for PageTimingsField {
         }
     }
 
-    fn write_rich_text(&self, _index: usize, timing: &PageTiming, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
+    fn write_rich_text(&self, timing: &PageTiming, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::OnContentLoad => {
                 if let Some(value) = &timing.on_content_load {
@@ -1801,7 +1801,7 @@ impl Field for PageTimingsField {
         Ok(())
     }
 
-    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+    fn compare(&self, lhs: &Self::Value, rhs: &Self::Value) -> Ordering {
         match self {
             Self::OnContentLoad => {
                 cmp_opt_f64(lhs.on_content_load, rhs.on_content_load)
@@ -1836,7 +1836,7 @@ where F: Field {
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (Some(lhs), Some(rhs)) => {
-            field.compare(0, lhs, 0, rhs)
+            field.compare(lhs, rhs)
         }
     }
 }
@@ -1883,12 +1883,99 @@ fn cmp_f64(lhs: f64, rhs: f64) -> Ordering {
     }
 }
 
-fn sort_by_fields<F: Field>(values: &mut [F::Value], order: &[F]) {
-    let mut indices = (0..values.len()).collect::<Vec<_>>();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Ascending,
+    Descending,
+}
 
-    indices.sort_by(|&lhs_index, &rhs_index| {
-        for field in order {
-            let cmp = field.compare(lhs_index, &values[lhs_index], rhs_index, &values[rhs_index]);
+#[derive(Debug, Clone)]
+pub struct Order<F>
+where F: Field {
+    pub field: F,
+    pub direction: Direction,
+}
+
+impl<F> Order<F>
+where F: Field {
+    fn compare(&self, lhs: &F::Value, rhs: &F::Value) -> Ordering {
+        match self.direction {
+            Direction::Ascending  => self.field.compare(lhs, rhs),
+            Direction::Descending => self.field.compare(lhs, rhs).reverse(),
+        }
+    }
+
+    fn parse<'a>(order: &'a str) -> Result<Self, ParserError<'a>> {
+        let mut offset = 0;
+        let direction = if order.starts_with('-') {
+            offset += 1;
+            Direction::Descending
+        } else {
+            Direction::Ascending
+        };
+
+        match F::parse(&order[offset..]) {
+            Ok(field) => Ok(Order { field, direction }),
+            Err(err) => Err(ParserError::new(order, offset + err.index())),
+        }
+    }
+}
+
+impl<F> std::fmt::Display for Order<F>
+where F: Field {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.direction == Direction::Descending {
+            "-".fmt(f)?;
+        }
+
+        self.field.fmt(f)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OrderParser<F> where F: Field {
+    phantom: PhantomData<F>
+}
+
+impl<F> clap::builder::TypedValueParser for OrderParser<F>
+where F: Field + Clone + Send + Sync + Sized + 'static {
+    type Value = Order<F>;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error>
+    {
+        let Some(value) = value.to_str() else {
+            return Err(clap::Error::new(clap::error::ErrorKind::InvalidUtf8));
+        };
+
+        match Order::<F>::parse(value) {
+            Ok(order) => Ok(order),
+            Err(err) => Err(clap::Error::raw(clap::error::ErrorKind::InvalidValue, err))
+        }
+    }
+}
+
+impl<F> clap::builder::ValueParserFactory for Order<F>
+where F: Field {
+    type Parser = OrderParser<F>;
+
+    #[inline]
+    fn value_parser() -> Self::Parser {
+        Self::Parser {
+            phantom: PhantomData
+        }
+    }
+}
+
+pub fn sort_by_fields<F: Field>(values: &mut Vec<F::Value>, order: &[Order<F>]) {
+    values.sort_by(|lhs, rhs| {
+        for ord in order {
+            let cmp = ord.compare(lhs, rhs);
             if cmp != Ordering::Equal {
                 return cmp;
             }
@@ -1896,11 +1983,4 @@ fn sort_by_fields<F: Field>(values: &mut [F::Value], order: &[F]) {
 
         Ordering::Equal
     });
-
-    for index in 0..values.len() {
-        let orig_index = indices[index];
-        values.swap(orig_index, index);
-        // XXX: this is wrong!!
-        indices[orig_index] = index;
-    }
 }

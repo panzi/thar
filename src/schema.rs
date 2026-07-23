@@ -8,6 +8,46 @@ pub struct HAR {
     pub log: Log,
 }
 
+impl HAR {
+    #[inline]
+    pub fn from_reader<R>(rdr: R) -> std::io::Result<HAR>
+    where R: std::io::Read {
+        let mut har: HAR = serde_json::from_reader(rdr)?;
+
+        har.after_deserialize();
+
+        Ok(har)
+    }
+
+    #[inline]
+    pub fn from_slice<'a>(v: &'a [u8]) -> std::io::Result<HAR> {
+        let mut har: HAR = serde_json::from_slice(v)?;
+
+        har.after_deserialize();
+
+        Ok(har)
+    }
+
+    #[inline]
+    pub fn from_str<'a>(v: &'a str) -> std::io::Result<HAR> {
+        let mut har: HAR = serde_json::from_str(v)?;
+
+        har.after_deserialize();
+
+        Ok(har)
+    }
+
+    fn after_deserialize(&mut self) {
+        for (index, entry) in self.log.entries.iter_mut().enumerate() {
+            entry._index = index;
+        }
+
+        for (index, page) in self.log.pages.iter_mut().enumerate() {
+            page._index = index;
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Default, Debug)]
 pub struct Log {
     pub version: Option<String>,
@@ -29,6 +69,8 @@ pub struct AppInfo {
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct Page {
+    #[serde(skip, default)]
+    pub _index: usize,
     #[serde(rename = "startedDateTime", with = "time::serde::iso8601")]
     pub started_date_time: OffsetDateTime,
     pub id: String,
@@ -49,6 +91,8 @@ pub struct PageTiming {
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct Entry {
+    #[serde(skip, default)]
+    pub _index: usize,
     pub pageref: Option<String>,
 
     #[serde(rename = "startedDateTime", with = "time::serde::iso8601")]

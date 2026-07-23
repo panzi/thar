@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{app::{App, AppConfig, AppQuit}, event::Event, fields::{ContentField, EntryField, PageField, RequestField, ResponseField}, message::{MessageBroker, MessageReceiver}, rect::Rect, schema::HAR, widget::{ActionFlags, Widget}};
+use crate::{app::{App, AppConfig, AppQuit}, event::Event, fields::{ContentField, EntryField, Order, PageField, RequestField, ResponseField, sort_by_fields}, message::{MessageBroker, MessageReceiver}, rect::Rect, schema::HAR, widget::{ActionFlags, Widget}};
 
 use clap::Parser;
 
@@ -36,10 +36,10 @@ struct Args {
     page_columns: Option<Vec<PageField>>,
 
     #[clap(long, use_value_delimiter = true, value_delimiter = ',')]
-    request_order: Option<Vec<EntryField>>,
+    request_order: Option<Vec<Order<EntryField>>>,
 
     #[clap(long, use_value_delimiter = true, value_delimiter = ',')]
-    page_order: Option<Vec<PageField>>,
+    page_order: Option<Vec<Order<PageField>>>,
 
     path: Option<OsString>,
 }
@@ -49,17 +49,17 @@ fn main() -> std::io::Result<()> {
 
     let mut har: HAR = if let Some(path) = args.path {
         let file = File::open(path)?;
-        serde_json::from_reader(BufReader::new(file))?
+        HAR::from_reader(BufReader::new(file))?
     } else {
-        serde_json::from_reader(std::io::stdin())?
+        HAR::from_reader(std::io::stdin())?
     };
 
     if let Some(request_order) = &args.request_order {
-
+        sort_by_fields(&mut har.log.entries, request_order);
     }
 
     if let Some(page_order) = &args.page_order {
-        
+        sort_by_fields(&mut har.log.pages, page_order);
     }
 
     // {
