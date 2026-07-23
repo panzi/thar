@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::{Widget, WidgetId, next_widget_id}};
+use crate::{color::{Color, Color16}, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::{ActionFlags, Widget, WidgetId, next_widget_id}};
 
 #[derive(Debug)]
 pub struct Tab {
@@ -139,7 +139,7 @@ impl Widget for Tabs {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Event, broker: &mut MessageBroker) {
+    fn handle_event(&mut self, event: &Event, broker: &mut MessageBroker) -> ActionFlags {
         if let Event::KeyPress { key: Key::Char(ch), ctrl: false, alt: true, shift: false } = event {
             for (index, tab) in self.tabs.iter_mut().enumerate() {
                 if tab.mnemonic.eq_ignore_ascii_case(ch) {
@@ -150,19 +150,27 @@ impl Widget for Tabs {
                         height: if self.draw_rect.height > 0 { self.draw_rect.height - 1 } else { 0 },
                         ..self.draw_rect
                     });
-                    return;
+                    return ActionFlags::Redraw;
                 }
             }
         }
 
         if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
-            event.send_to(tab.content.as_mut(), broker);
+            return event.send_to(tab.content.as_mut(), broker);
         }
+
+        ActionFlags::None
     }
 
-    fn handle_message(&mut self, message: &mut crate::message::Message, broker: &mut MessageBroker) {
-        for tab in &mut self.tabs {
-            tab.content.handle_message(message, broker);
+    fn handle_message(&mut self, message: &mut crate::message::Message, broker: &mut MessageBroker) -> ActionFlags {
+        let mut flags = ActionFlags::None;
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            let tab_flags = tab.content.handle_message(message, broker);
+            if index == self.selected_tab_index {
+                flags = tab_flags;
+            }
         }
+
+        flags
     }
 }

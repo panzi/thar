@@ -1,8 +1,12 @@
 use std::any::Any;
 
+use crate::widget::ActionFlags;
+
 #[allow(unused)]
 pub trait MessageReceiver {
-    fn handle_message(&mut self, message: &mut Message, broker: &mut MessageBroker) {}
+    fn handle_message(&mut self, message: &mut Message, broker: &mut MessageBroker) -> ActionFlags {
+        ActionFlags::None
+    }
 }
 
 #[derive(Debug)]
@@ -90,9 +94,11 @@ impl MessageBroker {
         self.messages.push(message);
     }
 
-    pub fn deliver(&mut self, receivers: &mut [&mut dyn MessageReceiver]) {
+    pub fn deliver(&mut self, receivers: &mut [&mut dyn MessageReceiver]) -> ActionFlags {
+        let mut flags = ActionFlags::None;
+
         if self.messages.is_empty() {
-            return;
+            return flags;
         }
 
         let mut messages = Vec::new();
@@ -104,12 +110,13 @@ impl MessageBroker {
                     if !message.propergate() {
                         break;
                     }
-                    receiver.handle_message(message, self);
+                    flags |= receiver.handle_message(message, self);
                 }
             }
 
             messages.clear();
         }
 
+        flags
     }
 }

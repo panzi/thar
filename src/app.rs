@@ -1,4 +1,4 @@
-use crate::{color::Color, event::{Event, Key}, fields::{EntryField, Field, PageField}, rect::Rect, rich_text::RichText, schema::HAR, table::{SelectTableRow, Table}, tabs::{Tab, Tabs}, widget::{Widget, WidgetId, next_widget_id}};
+use crate::{color::Color, event::{Event, Key}, fields::{EntryField, Field, PageField}, rect::Rect, rich_text::RichText, schema::HAR, table::{SelectTableRow, Table}, tabs::{Tab, Tabs}, widget::{ActionFlags, Widget, WidgetId, next_widget_id}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveView {
@@ -155,21 +155,23 @@ impl Widget for App {
         res
     }
 
-    fn handle_event(&mut self, event: &crate::event::Event, broker: &mut crate::message::MessageBroker) {
+    fn handle_event(&mut self, event: &crate::event::Event, broker: &mut crate::message::MessageBroker) -> ActionFlags {
         match event {
             Event::KeyPress { key: Key::Char('q'), alt: false, ctrl: false, shift: false } => {
                 broker.dispatch(AppQuit);
-                return;
+                return ActionFlags::None;
             }
             Event::KeyPress { key: Key::Escape, ctrl: false, alt: false, shift: false } => {
                 match self.active_view {
                     ActiveView::Entry(_) => {
                         self.active_view = ActiveView::Tabs;
                         self.tabs.set_selected_tab_id(self.requests_table_id);
+                        return ActionFlags::Redraw;
                     }
                     ActiveView::Page(_) => {
                         self.active_view = ActiveView::Tabs;
                         self.tabs.set_selected_tab_id(self.pages_table_id);
+                        return ActionFlags::Redraw;
                     }
                     _ => {}
                 }
@@ -179,7 +181,7 @@ impl Widget for App {
 
         match self.active_view {
             ActiveView::Tabs => {
-                event.send_to(&mut self.tabs, broker);
+                return event.send_to(&mut self.tabs, broker);
             }
             ActiveView::Entry(index) => {
                 // TODO
@@ -188,23 +190,40 @@ impl Widget for App {
                 // TODO
             }
         }
+
+        ActionFlags::None
     }
 
-    fn handle_message(&mut self, message: &mut crate::message::Message, broker: &mut crate::message::MessageBroker) {
+    fn handle_message(&mut self, message: &mut crate::message::Message, broker: &mut crate::message::MessageBroker) -> ActionFlags {
         if let Some(&SelectTableRow { widget_id, row_index }) = message.data() {
             if widget_id == self.requests_table_id {
                 message.stop_propergation();
-                self.active_view = ActiveView::Entry(row_index);
-                return;
+                let view = ActiveView::Entry(row_index);
+                if view != self.active_view {
+                    self.active_view = view;
+                    return ActionFlags::Redraw;
+                } else {
+                    return ActionFlags::None;
+                }
             } else if widget_id == self.pages_table_id {
                 message.stop_propergation();
-                self.active_view = ActiveView::Page(row_index);
-                return;
+                let view = ActiveView::Page(row_index);
+                if view != self.active_view {
+                    self.active_view = view;
+                    return ActionFlags::Redraw;
+                } else {
+                    return ActionFlags::None;
+                }
             }
         }
 
-        self.tabs.handle_message(message, broker);
-        // TODO
+        let flags = self.tabs.handle_message(message, broker);
+
+        if self.active_view == ActiveView::Tabs {
+            return flags;
+        }
+
+        ActionFlags::None
     }
 }
 

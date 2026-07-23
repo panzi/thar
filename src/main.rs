@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs::File, io::BufReader};
 
-use crate::{app::{App, AppConfig, AppQuit}, event::Event, fields::{ContentField, EntryField, PageField, RequestField, ResponseField}, message::{MessageBroker, MessageReceiver}, rect::Rect, schema::HAR, widget::Widget};
+use crate::{app::{App, AppConfig, AppQuit}, event::Event, fields::{ContentField, EntryField, PageField, RequestField, ResponseField}, message::{MessageBroker, MessageReceiver}, rect::Rect, schema::HAR, widget::{ActionFlags, Widget}};
 
 use clap::Parser;
 
@@ -97,6 +97,8 @@ fn main() -> std::io::Result<()> {
     app.draw(&mut termio, 0, 0)?;
 
     while let Some(event) = termio.wait()? {
+        let mut flags = ActionFlags::None;
+
         match event {
             Event::WindowSize { columns, rows } => {
                 app.set_draw_rect(&Rect {
@@ -105,18 +107,21 @@ fn main() -> std::io::Result<()> {
                     width: columns,
                     height: rows,
                 });
+                flags |= ActionFlags::Redraw;
             }
             _ => {}
         }
 
-        event.send_to(&mut app, &mut broker);
-        broker.deliver(&mut [&mut handler, &mut app]);
+        flags |= event.send_to(&mut app, &mut broker);
+        flags |= broker.deliver(&mut [&mut handler, &mut app]);
 
         if !handler.running {
             break;
         }
 
-        app.draw(&mut termio, 0, 0)?;
+        if flags.contains(ActionFlags::Redraw) {
+            app.draw(&mut termio, 0, 0)?;
+        }
     }
 
     //drop(termio);
@@ -135,9 +140,11 @@ struct MessageHandler {
 }
 
 impl MessageReceiver for MessageHandler {
-    fn handle_message(&mut self, message: &mut message::Message, _broker: &mut MessageBroker) {
+    fn handle_message(&mut self, message: &mut message::Message, _broker: &mut MessageBroker) -> ActionFlags {
         if let Some(AppQuit) = message.data() {
             self.running = false;
         }
+
+        ActionFlags::None
     }
 }

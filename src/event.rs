@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::{message::MessageBroker, point::{Point, nest_into}, widget::Widget};
+use crate::{message::MessageBroker, point::{Point, nest_into}, widget::{ActionFlags, Widget}};
 
 pub const ESCAPE: u8 = 0x1B;
 
@@ -144,43 +144,45 @@ impl Event {
         Self::KeyPress { ctrl: false, alt: true, shift: ch.is_uppercase(), key: Key::from_char(ch) }
     }
 
-    pub fn send_to(&self, child: &mut dyn Widget, broker: &mut MessageBroker) {
+    pub fn send_to(&self, child: &mut dyn Widget, broker: &mut MessageBroker) -> ActionFlags {
         let widget_rect = child.draw_rect();
         match self {
             &Self::CursorPosition { row, column } => {
                 if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
-                    child.handle_event(&Self::CursorPosition { row, column }, broker);
+                    return child.handle_event(&Self::CursorPosition { row, column }, broker);
                 }
             }
             &Self::MouseDown { row, column, shift, ctrl, alt, button } => {
                 if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
-                    child.handle_event(&Self::MouseDown { row, column, shift, ctrl, alt, button }, broker);
+                    return child.handle_event(&Self::MouseDown { row, column, shift, ctrl, alt, button }, broker);
                 }
             }
             &Self::MouseUp { row, column, shift, ctrl, alt, button } => {
                 if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
-                    child.handle_event(&Self::MouseUp { row, column, shift, ctrl, alt, button }, broker);
+                    return child.handle_event(&Self::MouseUp { row, column, shift, ctrl, alt, button }, broker);
                 }
             }
             &Self::MouseMove { row, column, shift, ctrl, alt, button } => {
                 if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
-                    child.handle_event(&Self::MouseMove { row, column, shift, ctrl, alt, button }, broker);
+                    return child.handle_event(&Self::MouseMove { row, column, shift, ctrl, alt, button }, broker);
                 }
             }
             &Self::WheelUp { row, column, shift, ctrl, alt } => {
                 if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
-                    child.handle_event(&Self::WheelUp { row, column, shift, ctrl, alt }, broker);
+                    return child.handle_event(&Self::WheelUp { row, column, shift, ctrl, alt }, broker);
                 }
             }
             &Self::WheelDown { row, column, shift, ctrl, alt } => {
                 if let Some(Point { row, column }) = nest_into(row, column, &widget_rect) {
-                    child.handle_event(&Self::WheelDown { row, column, shift, ctrl, alt }, broker);
+                    return child.handle_event(&Self::WheelDown { row, column, shift, ctrl, alt }, broker);
                 }
             }
             _ => {
-                child.handle_event(self, broker);
+                return child.handle_event(self, broker);
             }
         }
+
+        ActionFlags::None
     }
 }
 
