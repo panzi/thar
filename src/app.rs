@@ -15,11 +15,11 @@ pub struct AppConfig<'a> {
 
 #[derive(Debug)]
 pub struct App {
+    tabs: Tabs,
     draw_rect: Rect,
     widget_id: WidgetId,
     requests_table_id: WidgetId,
     pages_table_id: WidgetId,
-    tabs: Tabs,
     har: HAR,
     active_view: ActiveView,
 }

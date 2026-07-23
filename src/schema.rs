@@ -90,7 +90,7 @@ pub struct Entry {
 }
 
 /// Mozilla extension.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum SecurityState {
     Insecure,
@@ -110,7 +110,7 @@ impl std::fmt::Display for SecurityState {
 }
 
 /// Chrome extension.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum ResourceType {
     Document,
@@ -148,7 +148,7 @@ impl std::fmt::Display for ResourceType {
 }
 
 /// Chrome extension.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum CacheSource {
     Disk,
@@ -166,7 +166,7 @@ impl std::fmt::Display for CacheSource {
 }
 
 /// Chrome extension.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     VeryHigh,
     High,
@@ -204,6 +204,35 @@ pub enum Initiator {
     },
     #[serde(rename = "other")]
     Other,
+}
+
+impl Initiator {
+    #[inline]
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Initiator::Script { .. } => "script",
+            Initiator::Parser { .. } => "parser",
+            Initiator::Other => "other",
+        }
+    }
+
+    #[inline]
+    pub fn url(&self) -> Option<&Url> {
+        if let Initiator::Parser { url, .. } = self {
+            Some(url)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn line_number(&self) -> Option<i64> {
+        if let Initiator::Parser { line_number, .. } = self {
+            Some(*line_number)
+        } else {
+            None
+        }
+    }
 }
 
 /// Chromium extension.
@@ -348,9 +377,9 @@ pub struct Content {
 #[derive(Deserialize, Clone, Debug, Default)]
 pub struct Cache {
     #[serde(rename = "beforeRequest")]
-    pub before_request: Option<Option<CacheState>>,
+    pub before_request: Option<CacheState>,
     #[serde(rename = "afterRequest")]
-    pub after_request: Option<Option<CacheState>>,
+    pub after_request: Option<CacheState>,
     pub comment: Option<String>,
 }
 

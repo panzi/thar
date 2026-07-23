@@ -35,18 +35,32 @@ struct Args {
     #[clap(long, use_value_delimiter = true, value_delimiter = ',')]
     page_columns: Option<Vec<PageField>>,
 
+    #[clap(long, use_value_delimiter = true, value_delimiter = ',')]
+    request_order: Option<Vec<EntryField>>,
+
+    #[clap(long, use_value_delimiter = true, value_delimiter = ',')]
+    page_order: Option<Vec<PageField>>,
+
     path: Option<OsString>,
 }
 
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
-    let har: HAR = if let Some(path) = args.path {
+    let mut har: HAR = if let Some(path) = args.path {
         let file = File::open(path)?;
         serde_json::from_reader(BufReader::new(file))?
     } else {
         serde_json::from_reader(std::io::stdin())?
     };
+
+    if let Some(request_order) = &args.request_order {
+
+    }
+
+    if let Some(page_order) = &args.page_order {
+        
+    }
 
     // {
     //     // DEBUG: make list big

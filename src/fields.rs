@@ -1,6 +1,6 @@
 use crate::{char_width::CharWidth, color::{Color, Color16}, colorize::{colorize_json, colorize_sgml}, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
 
-use std::{fmt::Write, marker::PhantomData};
+use std::{cmp::Ordering, fmt::Write, marker::PhantomData};
 
 pub trait Field: Sized + std::fmt::Display {
     type Value;
@@ -8,6 +8,7 @@ pub trait Field: Sized + std::fmt::Display {
     fn header(&self) -> &str;
     fn align(&self) -> Align;
     fn write_rich_text(&self, index: usize, value: &Self::Value, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result;
+    fn compare(&self, lhs_index: usize, lhs: &Self::Value, rhs_index: usize, rhs: &Self::Value) -> Ordering;
 
     #[inline]
     fn to_column_def(&self) -> ColumnDef {
@@ -304,6 +305,59 @@ impl Field for EntryField {
         Ok(())
     }
 
+    fn compare(&self, lhs_index: usize, lhs: &Self::Value, rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::Index => {
+                lhs_index.cmp(&rhs_index)
+            }
+            Self::StartedDateTime => {
+                lhs.started_date_time.cmp(&rhs.started_date_time)
+            }
+            Self::Time => {
+                cmp_f64(lhs.time, rhs.time)
+            }
+            Self::Request(req) => {
+                req.compare(0, &lhs.request, 0, &rhs.request)
+            }
+            Self::Response(res) => {
+                cmp_opt_field(res, &lhs.response, &rhs.response)
+            }
+            Self::Cache(cache) => {
+                cmp_opt_field(cache, &lhs.cache, &rhs.cache)
+            }
+            Self::Timings(timings) => {
+                cmp_opt_field(timings, &lhs.timings, &rhs.timings)
+            }
+            Self::ServerIpAddress => {
+                cmp_opt(&lhs.server_ip_address, &rhs.server_ip_address)
+            }
+            Self::Connection => {
+                cmp_opt(&lhs.connection, &rhs.connection)
+            }
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            }
+            Self::_ConnectionId => {
+                cmp_opt(&lhs._connection_id, &rhs._connection_id)
+            }
+            Self::_SecurityState => {
+                cmp_opt(&lhs._security_state, &rhs._security_state)
+            }
+            Self::_Initiator(init) => {
+                cmp_opt_field(init, &lhs._initiator, &rhs._initiator)
+            }
+            Self::_Priority => {
+                cmp_opt(&lhs._priority, &rhs._priority)
+            }
+            Self::_ResourceType => {
+                cmp_opt(&lhs._resource_type, &rhs._resource_type)
+            }
+            Self::_FromCache => {
+                cmp_opt(&lhs._from_cache, &rhs._from_cache)
+            }
+        }
+    }
+
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if let Some((head, tail)) = field.split_once('.') {
             let map_err = |err: ParserError| ParserError::new(field, head.len() + 1 + err.index());
@@ -409,33 +463,37 @@ impl Field for InitiatorField {
     fn write_rich_text(&self, _index: usize, init: &Initiator, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::Type => {
-                match init {
-                    Initiator::Script { .. } => {
-                        rich_text.append_plain_text("script");
-                    }
-                    Initiator::Parser { .. } => {
-                        rich_text.append_plain_text("parser");
-                    }
-                    Initiator::Other => {
-                        rich_text.append_plain_text("other");
-                    }
-                }
-            },
+                rich_text.append_plain_text(init.type_name())
+            }
             Self::Url => {
                 if let Initiator::Parser { url, .. } = init {
                     write!(buf, "{url}")?;
                     rich_text.append_plain_text(buf);
                 }
-            },
+            }
             Self::LineNumber => {
                 if let Initiator::Parser { line_number, .. } = init {
                     write!(buf, "{line_number}")?;
                     rich_text.append_plain_text(buf);
                 }
-            },
+            }
         }
 
         Ok(())
+    }
+
+    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::Type => {
+                lhs.type_name().cmp(rhs.type_name())
+            }
+            Self::Url => {
+                cmp_opt(&lhs.url(), &rhs.url())
+            }
+            Self::LineNumber => {
+                cmp_opt(&lhs.line_number(), &rhs.line_number())
+            }
+        }
     }
 
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
@@ -617,6 +675,50 @@ impl Field for RequestField {
         }
 
         Ok(())
+    }
+
+    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::Method => {
+                lhs.method.cmp(&rhs.method)
+            },
+            Self::Url => {
+                lhs.url.cmp(&rhs.url)
+            },
+            Self::Scheme => {
+                lhs.url.scheme().cmp(rhs.url.scheme())
+            },
+            Self::Host => {
+                cmp_opt(&lhs.url.host_str(), &rhs.url.host_str())
+            },
+            Self::Port => {
+                cmp_opt(&lhs.url.port(), &rhs.url.port())
+            },
+            Self::Domain => {
+                cmp_opt(&lhs.url.domain(), &rhs.url.domain())
+            },
+            Self::Path => {
+                lhs.url.path().cmp(rhs.url.path())
+            },
+            Self::Query => {
+                cmp_opt(&lhs.url.query(), &rhs.url.query())
+            },
+            Self::Fragment => {
+                cmp_opt(&lhs.url.fragment(), &rhs.url.fragment())
+            },
+            Self::HttpVersion => {
+                lhs.http_version.cmp(&rhs.http_version)
+            },
+            Self::HeadersSize => {
+                lhs.headers_size.cmp(&rhs.headers_size)
+            },
+            Self::BodySize => {
+                lhs.body_size.cmp(&rhs.body_size)
+            },
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            },
+        }
     }
 
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
@@ -804,6 +906,41 @@ impl Field for ResponseField {
         Ok(())
     }
 
+    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::Status => {
+                lhs.status.cmp(&rhs.status)
+            },
+            Self::StatusText => {
+                lhs.status_text.cmp(&rhs.status_text)
+            },
+            Self::RedirectUrl => {
+                cmp_opt(&lhs.redirect_url, &rhs.redirect_url)
+            },
+            Self::Content(content) => {
+                cmp_opt_field(content, &lhs.content, &rhs.content)
+            },
+            Self::HeadersSize => {
+                lhs.headers_size.cmp(&rhs.headers_size)
+            },
+            Self::BodySize => {
+                lhs.body_size.cmp(&rhs.body_size)
+            },
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            },
+            Self::_TransferSize => {
+                lhs._transfer_size.cmp(&rhs._transfer_size)
+            },
+            Self::_Error => {
+                cmp_opt(&lhs._error, &rhs._error)
+            },
+            Self::_FetchedViaServiceWorker => {
+                cmp_opt(&lhs._fetched_via_service_worker, &rhs._fetched_via_service_worker)
+            },
+        }
+    }
+
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if let Some((head, tail)) = field.split_once('.') {
             let map_err = |err: ParserError| ParserError::new(field, head.len() + 1 + err.index());
@@ -948,6 +1085,29 @@ impl Field for ContentField {
         Ok(())
     }
 
+    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::Size => {
+                lhs.size.cmp(&rhs.size)
+            }
+            Self::Compression => {
+                cmp_opt(&lhs.compression, &rhs.compression)
+            }
+            Self::MimeType => {
+                cmp_opt(&lhs.mime_type, &rhs.mime_type)
+            }
+            Self::Text => {
+                cmp_opt(&lhs.text, &rhs.text)
+            }
+            Self::Encoding => {
+                cmp_opt(&lhs.encoding, &rhs.encoding)
+            }
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            }
+        }
+    }
+
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("size") {
             Ok(Self::Size)
@@ -1027,12 +1187,12 @@ impl Field for CacheField {
     fn write_rich_text(&self, _index: usize, cache: &Cache, rich_text: &mut RichText, buf: &mut String) -> std::fmt::Result {
         match self {
             Self::BeforeRequest(state_field) => {
-                if let Some(Some(state)) = &cache.before_request {
+                if let Some(state) = &cache.before_request {
                     state_field.write_rich_text(0, state, rich_text, buf)?;
                 }
             },
             Self::AfterRequest(state_field) => {
-                if let Some(Some(state)) = &cache.after_request {
+                if let Some(state) = &cache.after_request {
                     state_field.write_rich_text(0, state, rich_text, buf)?;
                 }
             },
@@ -1044,6 +1204,20 @@ impl Field for CacheField {
         }
 
         Ok(())
+    }
+
+    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::BeforeRequest(state_field) => {
+                cmp_opt_field(state_field, &lhs.before_request, &rhs.before_request)
+            },
+            Self::AfterRequest(state_field) => {
+                cmp_opt_field(state_field, &lhs.after_request, &rhs.after_request)
+            },
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            }
+        }
     }
 
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
@@ -1130,6 +1304,26 @@ impl Field for CacheStateField {
         }
 
         Ok(())
+    }
+
+    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::Expires => {
+                cmp_opt(&lhs.expires, &rhs.expires)
+            }
+            Self::LastAccess => {
+                lhs.last_access.cmp(&rhs.last_access)
+            }
+            Self::ETag => {
+                cmp_opt(&lhs.e_tag, &rhs.e_tag)
+            }
+            Self::HitCount => {
+                lhs.hit_count.cmp(&rhs.hit_count)
+            }
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            }
+        }
     }
 
     #[inline]
@@ -1319,6 +1513,51 @@ impl Field for TimingsField {
         Ok(())
     }
 
+    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::Blocked => {
+                cmp_f64(lhs.blocked, rhs.blocked)
+            }
+            Self::DNS => {
+                cmp_f64(lhs.dns, rhs.dns)
+            }
+            Self::Connect => {
+                cmp_f64(lhs.connect, rhs.connect)
+            }
+            Self::Send => {
+                cmp_f64(lhs.send, rhs.send)
+
+            }
+            Self::Wait => {
+                cmp_f64(lhs.wait, rhs.wait)
+            }
+            Self::Receive => {
+                cmp_f64(lhs.receive, rhs.receive)
+            }
+            Self::SSL => {
+                cmp_f64(lhs.ssl, rhs.ssl)
+            }
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            }
+            Self::_BlockedQueueing => {
+                cmp_f64(lhs._blocked_queueing, rhs._blocked_queueing)
+            }
+            Self::_WorkerStart => {
+                cmp_f64(lhs._worker_start, rhs._worker_start)
+            }
+            Self::_WorkerReady => {
+                cmp_f64(lhs._worker_ready, rhs._worker_ready)
+            }
+            Self::_WorkerFetchStart => {
+                cmp_f64(lhs._worker_fetch_start, rhs._worker_fetch_start)
+            }
+            Self::_WorkerRespondWithSettled => {
+                cmp_f64(lhs._worker_respond_with_settled, rhs._worker_respond_with_settled)
+            }
+        }
+    }
+
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("blocked") {
             Ok(Self::Blocked)
@@ -1442,6 +1681,29 @@ impl Field for PageField {
         Ok(())
     }
 
+    fn compare(&self, lhs_index: usize, lhs: &Self::Value, rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::Index => {
+                lhs_index.cmp(&rhs_index)
+            }
+            Self::StartedDateTime => {
+                lhs.started_date_time.cmp(&rhs.started_date_time)
+            }
+            Self::Id => {
+                lhs.id.cmp(&rhs.id)
+            }
+            Self::Title => {
+                lhs.title.cmp(&rhs.title)
+            }
+            Self::PageTimings(timings) => {
+                cmp_opt_field(timings, &lhs.page_timings, &rhs.page_timings)
+            }
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            }
+        }
+    }
+
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if let Some((head, tail)) = field.split_once('.') {
             let map_err = |err: ParserError| ParserError::new(field, head.len() + 1 + err.index());
@@ -1539,6 +1801,20 @@ impl Field for PageTimingsField {
         Ok(())
     }
 
+    fn compare(&self, _lhs_index: usize, lhs: &Self::Value, _rhs_index: usize, rhs: &Self::Value) -> Ordering {
+        match self {
+            Self::OnContentLoad => {
+                cmp_opt_f64(lhs.on_content_load, rhs.on_content_load)
+            }
+            Self::OnLoad => {
+                cmp_opt_f64(lhs.on_load, rhs.on_load)
+            }
+            Self::Comment => {
+                cmp_opt(&lhs.comment, &rhs.comment)
+            }
+        }
+    }
+
     fn parse<'a>(field: &'a str) -> Result<Self, ParserError<'a>> {
         if field.eq_ignore_ascii_case("OnContentLoad") {
             Ok(Self::OnContentLoad)
@@ -1549,5 +1825,82 @@ impl Field for PageTimingsField {
         } else {
             Err(ParserError::new(field, 0))
         }
+    }
+}
+
+#[inline]
+fn cmp_opt_field<F>(field: &F, lhs: &Option<F::Value>, rhs: &Option<F::Value>) -> Ordering
+where F: Field {
+    match (lhs, rhs) {
+        (None, None) => Ordering::Equal,
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(lhs), Some(rhs)) => {
+            field.compare(0, lhs, 0, rhs)
+        }
+    }
+}
+
+#[inline]
+fn cmp_opt<T>(lhs: &Option<T>, rhs: &Option<T>) -> Ordering
+where T: Ord {
+    match (lhs, rhs) {
+        (None, None) => Ordering::Equal,
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(lhs), Some(rhs)) => {
+            lhs.cmp(rhs)
+        }
+    }
+}
+
+#[inline]
+fn cmp_opt_f64(lhs: Option<f64>, rhs: Option<f64>) -> Ordering {
+    match (lhs, rhs) {
+        (None, None) => Ordering::Equal,
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(lhs), Some(rhs)) => {
+            cmp_f64(lhs, rhs)
+        }
+    }
+}
+
+#[inline]
+fn cmp_f64(lhs: f64, rhs: f64) -> Ordering {
+    if lhs.is_nan() && rhs.is_nan() {
+        Ordering::Equal
+    } else if !lhs.is_nan() && rhs.is_nan() {
+        Ordering::Less
+    } else if lhs.is_nan() && !rhs.is_nan() {
+        Ordering::Greater
+    } else if lhs < rhs {
+        Ordering::Less
+    } else if lhs > rhs {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
+    }
+}
+
+fn sort_by_fields<F: Field>(values: &mut [F::Value], order: &[F]) {
+    let mut indices = (0..values.len()).collect::<Vec<_>>();
+
+    indices.sort_by(|&lhs_index, &rhs_index| {
+        for field in order {
+            let cmp = field.compare(lhs_index, &values[lhs_index], rhs_index, &values[rhs_index]);
+            if cmp != Ordering::Equal {
+                return cmp;
+            }
+        }
+
+        Ordering::Equal
+    });
+
+    for index in 0..values.len() {
+        let orig_index = indices[index];
+        values.swap(orig_index, index);
+        // XXX: this is wrong!!
+        indices[orig_index] = index;
     }
 }
