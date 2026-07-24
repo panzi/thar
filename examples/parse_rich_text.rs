@@ -9,6 +9,7 @@ fn main() -> std::io::Result<()> {
             Err(error) => {
                 eprintln!("{:#?}\n{error}", error.location());
                 error.print_line(&arg, &mut std::io::stderr())?;
+                std::process::exit(1);
             }
         }
     }

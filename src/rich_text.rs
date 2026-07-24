@@ -1,4 +1,4 @@
-use crate::{ansi_codes::{BOLD, DOUBLY_UNDERLINE, FAINT, ITALIC, NORMAL_INTENSITY, NOT_ITALIC, NOT_UNDERLINE, UNDERLINE, write_bg, write_fg}, char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration}, termio::TermIO};
+use crate::{ansi_codes::{write_bg, write_fg}, char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, Style, TextDecoration}, termio::TermIO, wrap::LineWrapper};
 
 use bitflags::bitflags;
 
@@ -800,44 +800,88 @@ impl RichText {
     }
 
     pub fn print(&self, write: &mut impl std::io::Write) -> std::io::Result<()> {
+        let mut style = RichTextStyle::default();
         for line in &self.lines {
+            DEFAULT_STYLE.write_diff(&style, write)?;
+
             for item in line {
                 match item {
                     RichTextCode::FontWeight(font_weight) => {
-                        match font_weight {
-                            FontWeight::Normal => write.write_all(NORMAL_INTENSITY)?,
-                            FontWeight::Bold => write.write_all(BOLD)?,
-                            FontWeight::Faint => write.write_all(FAINT)?,
-                        }
+                        font_weight.write(write)?;
+                        style.font_weight = *font_weight;
                     }
                     RichTextCode::FontStyle(font_style) => {
-                        match font_style {
-                            FontStyle::Normal => write.write_all(NOT_ITALIC)?,
-                            FontStyle::Italic => write.write_all(ITALIC)?,
-                        }
+                        font_style.write(write)?;
+                        style.font_style = *font_style;
                     }
                     RichTextCode::TextDecoration(text_decoration) => {
-                        match text_decoration {
-                            TextDecoration::None => write.write_all(NOT_UNDERLINE)?,
-                            TextDecoration::Underline => write.write_all(UNDERLINE)?,
-                            TextDecoration::DoublyUnderline => write.write_all(DOUBLY_UNDERLINE)?,
-                        }
+                        text_decoration.write(write)?;
+                        style.text_decoration = *text_decoration;
                     }
                     &RichTextCode::Foreground(color) => {
                         write_fg(write, color)?;
+                        style.foreground = color;
                     }
                     &RichTextCode::Background(color) => {
                         write_bg(write, color)?;
+                        style.background = color;
                     }
                     RichTextCode::Text { text, .. } => {
                         write.write_all(text.as_bytes())?;
                     }
                 }
             }
+
+            style.write_diff(&DEFAULT_STYLE, write)?;
             write.write_all(b"\n")?;
         }
 
         Ok(())
+    }
+
+    pub fn wrap(&self, width: usize) -> RichText {
+        let mut new_lines = Vec::with_capacity(self.lines.len());
+        let mut max_width = 0;
+
+        for line in &self.lines {
+            let mut line_width = 0;
+            let mut new_line = new_lines.push_mut(Vec::with_capacity(line.len()));
+
+            for code in line {
+                if let RichTextCode::Text { text, width: text_width } = code {
+                    let new_width = line_width + text_width;
+                    if new_width < width {
+                        new_line.push(code.clone());
+                        line_width = new_width;
+                    } else if new_width == width {
+                        new_line.push(code.clone());
+                        if line_width > max_width {
+                            max_width = line_width;
+                        }
+                        line_width = 0;
+                        new_line = new_lines.push_mut(Vec::new());
+                    } else {
+                        for text_line in LineWrapper::with_prefix_width(text, width, line_width) {
+                            let text_width = text_line.char_width_ignore_unprintable();
+                            line_width += text_width;
+                            new_line.push(RichTextCode::Text {
+                                text: text_line.to_owned(),
+                                width: text_width,
+                            });
+                            new_line = new_lines.push_mut(Vec::new());
+                            if line_width > max_width {
+                                max_width = line_width;
+                            }
+                            line_width = 0;
+                        }
+                    }
+                } else {
+                    new_line.push(code.clone());
+                }
+            }
+        }
+
+        RichText { lines: new_lines, width: max_width }
     }
 }
 
@@ -960,6 +1004,11 @@ impl Default for RichTextStyle {
 
 impl RichTextStyle {
     #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
     pub fn is_default(&self) -> bool {
         self == &DEFAULT_STYLE
     }
@@ -988,6 +1037,34 @@ impl RichTextStyle {
         if self.background != new_style.background {
             code.push(RichTextCode::Background(new_style.background));
         }
+    }
+
+    pub fn write_diff(&self, new_style: &RichTextStyle, write: &mut impl std::io::Write) -> std::io::Result<()> {
+        if std::ptr::eq(self, new_style) {
+            return Ok(());
+        }
+
+        if self.font_weight != new_style.font_weight {
+            new_style.font_weight.write(write)?;
+        }
+
+        if self.text_decoration != new_style.text_decoration {
+            new_style.text_decoration.write(write)?;
+        }
+
+        if self.font_style != new_style.font_style {
+            new_style.font_style.write(write)?;
+        }
+
+        if self.foreground != new_style.foreground {
+            write_fg(write, new_style.foreground)?;
+        }
+
+        if self.background != new_style.background {
+            write_bg(write, new_style.background)?;
+        }
+
+        Ok(())
     }
 
     #[inline]

@@ -10,7 +10,6 @@ pub struct Table {
     draw_rect: Rect,
     widget_id: WidgetId,
     width: usize,
-    header_height: usize,
     rows_height: usize,
     selected_row_index: usize,
     scroll_row: u32,
@@ -137,7 +136,6 @@ impl Table {
             draw_rect: Rect::default(),
             widget_id: next_widget_id(),
             width: 0,
-            header_height: 0,
             rows_height: 0,
             selected_row_index: 0,
             scroll_row: 0,
@@ -154,7 +152,6 @@ impl Table {
             formatted_header: RichText::new(),
             formatted_rows: Vec::new(),
             width: 0,
-            header_height: 0,
             rows_height: 0,
             scroll_row: 0,
             scroll_column: 0,
@@ -175,7 +172,7 @@ impl Table {
 
     #[inline]
     pub fn header_height(&self) -> usize {
-        self.header_height
+        self.formatted_header.height()
     }
 
     #[inline]
@@ -185,7 +182,7 @@ impl Table {
 
     #[inline]
     pub fn height(&self) -> usize {
-        self.header_height + self.rows_height
+        self.formatted_header.height() + self.rows_height
     }
 
     #[inline]
@@ -225,7 +222,7 @@ impl Table {
 
         let mut style_buf = Vec::new();
         self.formatted_rows.reserve(1 + self.rows.len());
-        self.header_height = format_row(&self.columns, &self.header, &mut self.formatted_header, &mut style_buf);
+        format_row(&self.columns, &self.header, &mut self.formatted_header, &mut style_buf);
 
         self.rows_height = 0;
         for row in &self.rows {
@@ -295,10 +292,10 @@ impl Table {
     }
 
     fn after_selection_up(&mut self) {
-        if self.header_height >= self.draw_rect.height as usize {
+        if self.header_height() >= self.draw_rect.height as usize {
             self.scroll_row = 0;
         } else {
-            let avail_height = self.draw_rect.height as usize - self.header_height;
+            let avail_height = self.draw_rect.height as usize - self.header_height();
             let mut body_height = 0;
             let mut selected_top = 0;
             let mut selected_height = 0;
@@ -325,10 +322,10 @@ impl Table {
     }
 
     fn after_selection_down(&mut self) {
-        if self.header_height >= self.draw_rect.height as usize {
+        if self.header_height() >= self.draw_rect.height as usize {
             self.scroll_row = 0;
         } else {
-            let avail_height = self.draw_rect.height as usize - self.header_height;
+            let avail_height = self.draw_rect.height as usize - self.header_height();
             let mut body_height = 0;
             let mut selected_top = 0;
             let mut selected_height = 0;
@@ -571,13 +568,13 @@ impl Widget for Table {
                 }
             }
             Event::KeyPress { key: Key::PageUp, alt: false, ctrl: false, shift: false } => {
-                if self.header_height >= self.draw_rect.height as usize {
+                if self.header_height() >= self.draw_rect.height as usize {
                     if self.scroll_row != 0 {
                         self.scroll_row = 0;
                         return ActionFlags::Redraw;
                     }
                 } else if self.selected_row_index > 0 {
-                    let avail_height = self.draw_rect.height as usize - self.header_height;
+                    let avail_height = self.draw_rect.height as usize - self.header_height();
                     let mut body_height = 0;
                     let mut selected_top = 0;
 
@@ -615,13 +612,13 @@ impl Widget for Table {
                 }
             }
             Event::KeyPress { key: Key::PageDown, alt: false, ctrl: false, shift: false } => {
-                if self.header_height >= self.draw_rect.height as usize {
+                if self.header_height() >= self.draw_rect.height as usize {
                     if self.scroll_row != 0 {
                         self.scroll_row = 0;
                         return ActionFlags::Redraw;
                     }
                 } else if self.selected_row_index < self.formatted_rows.len() {
-                    let avail_height = self.draw_rect.height as usize - self.header_height;
+                    let avail_height = self.draw_rect.height as usize - self.header_height();
                     let mut body_height = 0;
                     let mut selected_top = 0;
 

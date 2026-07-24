@@ -26,6 +26,7 @@ pub mod page_view;
 pub mod property_list;
 pub mod colorize;
 pub mod ansi_codes;
+pub mod wrap;
 
 #[derive(Parser)]
 struct Args {
