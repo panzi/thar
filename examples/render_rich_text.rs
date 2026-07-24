@@ -3,7 +3,7 @@ use thar::{color::Color16, event::{Event, Key}, rich_text::{RichText, RichTextSt
 
 fn main() -> std::io::Result<()> {
     let rich_text = "\
-[b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]\n[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg]
+[b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]\n[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg][bg=yellow] BLA[/bg] [bg=red]BLUB[/bg]
 This is a long line demonstrating how things are truncated.
 A second long line to verify this works for all lines.
 A last line.";

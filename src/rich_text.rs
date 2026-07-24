@@ -1,5 +1,7 @@
 use crate::{ansi_codes::{BOLD, DOUBLY_UNDERLINE, FAINT, ITALIC, NORMAL_INTENSITY, NOT_ITALIC, NOT_UNDERLINE, UNDERLINE, write_bg, write_fg}, char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, TextDecoration}, termio::TermIO};
 
+use bitflags::bitflags;
+
 /// Simple rich text format, a bit like BB code.
 /// 
 /// Tags:
@@ -75,7 +77,130 @@ impl RichText {
         self.append_text(&DEFAULT_STYLE, plain_text);
     }
 
+    fn append_style(&mut self, style: &RichTextStyle) {
+        if self.lines.is_empty() {
+            let line = self.lines.push_mut(Vec::new());
+            DEFAULT_STYLE.diff(style, line);
+            return;
+        }
+
+        if style.is_default() {
+            return;
+        }
+
+        bitflags! {
+            #[derive(Debug, PartialEq, Eq)]
+            struct FinishedFeatures: u32 {
+                const None           =  0;
+                const FontStyle      =  1;
+                const FontWeight     =  2;
+                const TextDecoration =  4;
+                const Foreground     =  8;
+                const Background     = 16;
+                const All = (
+                    Self::FontStyle.bits() |
+                    Self::FontWeight.bits() |
+                    Self::TextDecoration.bits() |
+                    Self::Foreground.bits() |
+                    Self::Background.bits()
+                );
+            }
+        }
+
+        let mut feat = FinishedFeatures::None;
+
+        if style.font_style == FontStyle::Normal {
+            feat |= FinishedFeatures::FontStyle;
+        }
+
+        if style.font_weight == FontWeight::Normal {
+            feat |= FinishedFeatures::FontWeight;
+        }
+
+        if style.text_decoration == TextDecoration::None {
+            feat |= FinishedFeatures::TextDecoration;
+        }
+
+        if style.foreground == Color::Default {
+            feat |= FinishedFeatures::Foreground;
+        }
+
+        if style.background == Color::Default {
+            feat |= FinishedFeatures::Background;
+        }
+
+        'outer: for line in self.lines.iter_mut().rev() {
+            for code in line.iter_mut().rev() {
+                match code {
+                    RichTextCode::FontStyle(font_style) => {
+                        if !feat.contains(FinishedFeatures::FontStyle) {
+                            *font_style = style.font_style;
+                            feat |= FinishedFeatures::FontStyle;
+                        }
+                    }
+                    RichTextCode::FontWeight(font_weight) => {
+                        if !feat.contains(FinishedFeatures::FontWeight) {
+                            *font_weight = style.font_weight;
+                            feat |= FinishedFeatures::FontWeight;
+                        }
+                    }
+                    RichTextCode::TextDecoration(text_decoration) => {
+                        if !feat.contains(FinishedFeatures::TextDecoration) {
+                            *text_decoration = style.text_decoration;
+                            feat |= FinishedFeatures::TextDecoration;
+                        }
+                    }
+                    RichTextCode::Foreground(color) => {
+                        if !feat.contains(FinishedFeatures::Foreground) {
+                            *color = style.foreground;
+                            feat |= FinishedFeatures::Foreground;
+                        }
+                    }
+                    RichTextCode::Background(color) => {
+                        if !feat.contains(FinishedFeatures::Background) {
+                            *color = style.background;
+                            feat |= FinishedFeatures::Background;
+                        }
+                    }
+                    RichTextCode::Text { .. } => {
+                        break 'outer;
+                    }
+                }
+
+                if feat == FinishedFeatures::All {
+                    break 'outer;
+                }
+            }
+        }
+
+        if feat != FinishedFeatures::All {
+            let line = self.lines.last_mut().unwrap();
+
+            if !feat.contains(FinishedFeatures::FontStyle) {
+                line.push(RichTextCode::FontStyle(style.font_style));
+            }
+
+            if !feat.contains(FinishedFeatures::FontWeight) {
+                line.push(RichTextCode::FontWeight(style.font_weight));
+            }
+
+            if !feat.contains(FinishedFeatures::TextDecoration) {
+                line.push(RichTextCode::TextDecoration(style.text_decoration));
+            }
+
+            if !feat.contains(FinishedFeatures::Foreground) {
+                line.push(RichTextCode::Foreground(style.foreground));
+            }
+
+            if !feat.contains(FinishedFeatures::Background) {
+                line.push(RichTextCode::Background(style.background));
+            }
+        }
+    }
+
     pub fn append_text(&mut self, style: &RichTextStyle, plain_text: &str) {
+        self.append_style(style);
+
         let mut line = if let Some(line) = self.lines.last_mut() {
             line
         } else {
@@ -83,9 +208,6 @@ impl RichText {
         };
         let mut line_width = line_width(line);
         let mut prev_index = 0;
-
-        // TODO: optimize style
-        DEFAULT_STYLE.diff(style, &mut line);
 
         for (index, ch) in plain_text.char_indices() {
             if ch.is_ascii_control() {
@@ -278,31 +400,31 @@ impl RichText {
                             match tag {
                                 Tag::Bold => {
                                     if current_style.font_weight != FontWeight::Bold {
-                                        line.push(RichTextCode::FontWeight(FontWeight::Bold));
+                                        append_font_weight(line, FontWeight::Bold);
                                         current_style.font_weight = FontWeight::Bold;
                                     }
                                 }
                                 Tag::Faint => {
                                     if current_style.font_weight != FontWeight::Faint {
-                                        line.push(RichTextCode::FontWeight(FontWeight::Faint));
+                                        append_font_weight(line, FontWeight::Faint);
                                         current_style.font_weight = FontWeight::Faint;
                                     }
                                 }
                                 Tag::Italic => {
                                     if current_style.font_style != FontStyle::Italic {
-                                        line.push(RichTextCode::FontStyle(FontStyle::Italic));
+                                        append_font_style(line, FontStyle::Italic);
                                         current_style.font_style = FontStyle::Italic;
                                     }
                                 }
                                 Tag::Underline => {
                                     if current_style.text_decoration != TextDecoration::Underline {
-                                        line.push(RichTextCode::TextDecoration(TextDecoration::Underline));
+                                        append_text_decoration(line, TextDecoration::Underline);
                                         current_style.text_decoration = TextDecoration::Underline;
                                     }
                                 }
                                 Tag::DoublyUnderline => {
                                     if current_style.text_decoration != TextDecoration::DoublyUnderline {
-                                        line.push(RichTextCode::TextDecoration(TextDecoration::DoublyUnderline));
+                                        append_text_decoration(line, TextDecoration::DoublyUnderline);
                                         current_style.text_decoration = TextDecoration::DoublyUnderline;
                                     }
                                 }
@@ -310,7 +432,7 @@ impl RichText {
                                     let (new_index, color) = parse_color_attr(rich_text, index)?;
                                     index = new_index;
                                     if current_style.foreground != color {
-                                        line.push(RichTextCode::Foreground(color));
+                                        append_foreground(line, color);
                                         current_style.foreground = color;
                                     }
                                 }
@@ -318,7 +440,7 @@ impl RichText {
                                     let (new_index, color) = parse_color_attr(rich_text, index)?;
                                     index = new_index;
                                     if current_style.background != color {
-                                        line.push(RichTextCode::Background(color));
+                                        append_background(line, color);
                                         current_style.background = color;
                                     }
                                 }
@@ -837,6 +959,11 @@ impl Default for RichTextStyle {
 }
 
 impl RichTextStyle {
+    #[inline]
+    pub fn is_default(&self) -> bool {
+        self == &DEFAULT_STYLE
+    }
+
     pub fn diff(&self, new_style: &RichTextStyle, code: &mut Vec<RichTextCode>) {
         if std::ptr::eq(self, new_style) {
             return;
@@ -1147,5 +1274,105 @@ impl Location {
             line_end,
             column_index: index - line_start,
         }
+    }
+}
+
+fn append_font_weight(line: &mut Vec<RichTextCode>, new_font_weight: FontWeight) {
+    let mut found = false;
+    for code in line.iter_mut().rev() {
+        match code {
+            RichTextCode::FontWeight(font_weigth) => {
+                *font_weigth = new_font_weight;
+                found = true;
+            }
+            RichTextCode::Text { .. } => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if !found {
+        line.push(RichTextCode::FontWeight(new_font_weight));
+    }
+}
+
+fn append_font_style(line: &mut Vec<RichTextCode>, new_font_style: FontStyle) {
+    let mut found = false;
+    for code in line.iter_mut().rev() {
+        match code {
+            RichTextCode::FontStyle(font_style) => {
+                *font_style = new_font_style;
+                found = true;
+            }
+            RichTextCode::Text { .. } => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if !found {
+        line.push(RichTextCode::FontStyle(new_font_style));
+    }
+}
+
+fn append_text_decoration(line: &mut Vec<RichTextCode>, new_text_decoration: TextDecoration) {
+    let mut found = false;
+    for code in line.iter_mut().rev() {
+        match code {
+            RichTextCode::TextDecoration(text_decoration) => {
+                *text_decoration = new_text_decoration;
+                found = true;
+            }
+            RichTextCode::Text { .. } => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if !found {
+        line.push(RichTextCode::TextDecoration(new_text_decoration));
+    }
+}
+
+fn append_foreground(line: &mut Vec<RichTextCode>, new_color: Color) {
+    let mut found = false;
+    for code in line.iter_mut().rev() {
+        match code {
+            RichTextCode::Foreground(color) => {
+                *color = new_color;
+                found = true;
+            }
+            RichTextCode::Text { .. } => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if !found {
+        line.push(RichTextCode::Foreground(new_color));
+    }
+}
+
+fn append_background(line: &mut Vec<RichTextCode>, new_color: Color) {
+    let mut found = false;
+    for code in line.iter_mut().rev() {
+        match code {
+            RichTextCode::Background(color) => {
+                *color = new_color;
+                found = true;
+            }
+            RichTextCode::Text { .. } => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if !found {
+        line.push(RichTextCode::Background(new_color));
     }
 }
