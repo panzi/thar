@@ -14,9 +14,8 @@ pub struct PropertyList {
     rows_height: usize,
     selected_row_index: usize,
 
-    // not sure about these. how will editing work?
+    // not sure about this. how will editing work?
     scroll_row: u32,
-    scroll_column: u32,
 
     editable: bool,
     edit_state: Option<EditState>,
@@ -38,7 +37,6 @@ impl PropertyList {
             rows_height: 0,
             selected_row_index: 0,
             scroll_row: 0,
-            scroll_column: 0,
             editable: false,
             edit_state: None,
         }

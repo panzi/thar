@@ -1,5 +1,3 @@
-use crate::rich_text::line_width;
-
 unsafe extern "C" {
     fn wcwidth(ch: libc::wchar_t) -> libc::c_int;
 }
