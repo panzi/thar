@@ -18,7 +18,7 @@ pub fn next_widget_id() -> WidgetId {
 pub trait Widget: std::fmt::Debug {
     fn widget_id(&self) -> WidgetId;
     fn set_draw_rect(&mut self, rect: &Rect);
-    fn draw_rect(&self) -> Rect;
+    fn draw_rect(&self) -> &Rect;
 
     fn draw(&self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()>;
 

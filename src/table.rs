@@ -366,8 +366,8 @@ impl Widget for Table {
     }
 
     #[inline]
-    fn draw_rect(&self) -> Rect {
-        self.draw_rect
+    fn draw_rect(&self) -> &Rect {
+        &self.draw_rect
     }
 
     #[inline]

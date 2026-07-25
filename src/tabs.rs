@@ -94,8 +94,8 @@ impl Widget for Tabs {
     }
 
     #[inline]
-    fn draw_rect(&self) -> Rect {
-        self.draw_rect
+    fn draw_rect(&self) -> &Rect {
+        &self.draw_rect
     }
 
     #[inline]

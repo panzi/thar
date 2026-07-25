@@ -94,8 +94,8 @@ impl App {
 
 impl Widget for App {
     #[inline]
-    fn draw_rect(&self) -> Rect {
-        self.draw_rect
+    fn draw_rect(&self) -> &Rect {
+        &self.draw_rect
     }
 
     #[inline]
