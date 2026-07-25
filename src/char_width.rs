@@ -1,3 +1,5 @@
+use crate::rich_text::line_width;
+
 unsafe extern "C" {
     fn wcwidth(ch: libc::wchar_t) -> libc::c_int;
 }
@@ -32,6 +34,45 @@ pub fn wcswidth_ignore_unprintable(s: &str) -> usize {
     }
 
     swidth
+}
+
+
+#[inline]
+pub fn wcs_max_width(s: &str) -> usize {
+    let mut maxwidth: usize = 0;
+    let mut swidth: usize = 0;
+
+    for ch in s.chars() {
+        if ch == '\n' {
+            if swidth > maxwidth {
+                maxwidth = swidth;
+                swidth = 0;
+            }
+        } else {
+            let cwidth = unsafe { wcwidth(ch as libc::wchar_t) };
+
+            if cwidth > 0 {
+                swidth += cwidth as usize;
+            }
+        }
+    }
+
+    if swidth > maxwidth {
+        maxwidth = swidth;
+    }
+
+    maxwidth
+}
+
+pub fn right_pad_line(text: &mut String, width: usize) {
+    let text_width = text.char_width_ignore_unprintable();
+    if text_width < width {
+        let diff = width - text_width;
+        text.reserve(diff);
+        for _ in 0..diff {
+            text.push(' ');
+        }
+    }
 }
 
 pub trait CharWidth {

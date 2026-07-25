@@ -1,4 +1,4 @@
-use crate::{rect::Rect, rich_text::{DEFAULT_STYLE, RichText, right_pad_line, right_pad_line_with}, widget::{Widget, WidgetId, next_widget_id}};
+use crate::{char_width::{CharWidth, wcs_max_width}, rect::Rect, widget::{Widget, WidgetId, next_widget_id}, wrap::wrap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyList {
@@ -8,10 +8,8 @@ pub struct PropertyList {
     formatted_widths: (usize, usize),
     header: (String, String),
     rows: Vec<(String, String)>,
-    formatted_headers: (RichText, RichText),
-    formatted_header: RichText,
-    formatted_pairs: Vec<(RichText, RichText)>,
-    formatted_rows: Vec<RichText>,
+    formatted_header: Vec<String>,
+    formatted_rows: Vec<Vec<String>>,
     header_height: usize,
     rows_height: usize,
     selected_row_index: usize,
@@ -21,32 +19,28 @@ pub struct PropertyList {
     scroll_column: u32,
 
     editable: bool,
+    edit_state: Option<EditState>,
 }
 
 impl PropertyList {
     #[inline]
     pub fn new(key_header: String, value_header: String) -> Self {
-        let formatted_key = RichText::from_plain_text(&key_header);
-        let formatted_value = RichText::from_plain_text(&value_header);
-        let header_height = formatted_key.height().max(formatted_value.height());
-
         Self {
             draw_rect: Rect::default(),
             widget_id: next_widget_id(),
-            widths: (formatted_key.width(), formatted_value.width()),
-            formatted_widths: (formatted_key.width(), formatted_value.width()),
+            widths: (0, 0),
+            formatted_widths: (0, 0),
             header: (key_header, value_header),
             rows: Vec::new(),
-            formatted_headers: (formatted_key, formatted_value),
-            formatted_header: RichText::new(),
-            formatted_pairs: Vec::new(),
+            formatted_header: Vec::new(),
             formatted_rows: Vec::new(),
-            header_height,
+            header_height: 0,
             rows_height: 0,
             selected_row_index: 0,
             scroll_row: 0,
             scroll_column: 0,
             editable: false,
+            edit_state: None,
         }
     }
 
@@ -67,24 +61,20 @@ impl PropertyList {
     }
 
     pub fn preformat(&mut self) {
-        self.formatted_pairs.clear();
-
-        let mut key_width = self.formatted_headers.0.width();
-        let mut value_width = self.formatted_headers.1.width();
+        let mut key_width = wcs_max_width(&self.header.0);
+        let mut value_width = wcs_max_width(&self.header.1);
 
         for (key, value) in &self.rows {
-            let rich_text_key = RichText::from_plain_text(key);
-            let rich_text_value = RichText::from_plain_text(value);
+            let row_key_width = wcs_max_width(key);
+            let row_value_width = wcs_max_width(value);
 
-            if rich_text_key.width() > key_width {
-                key_width = rich_text_key.width();
+            if row_key_width > key_width {
+                key_width = row_key_width;
             }
 
-            if rich_text_value.width() > value_width {
-                value_width = rich_text_value.width();
+            if row_value_width > value_width {
+                value_width = row_value_width;
             }
-
-            self.formatted_pairs.push((rich_text_key, rich_text_value));
         }
 
         self.widths = (key_width, value_width);
@@ -117,11 +107,11 @@ impl PropertyList {
 
         self.formatted_widths = (key_width, value_width);
 
-        self.header_height = format_row(&self.formatted_headers.0, &self.formatted_headers.1, key_width, value_width, &mut self.formatted_header);
+        self.header_height = format_row(&self.header.0, &self.header.1, key_width, value_width, &mut self.formatted_header);
 
         let mut rows_height = 0;
-        for (key, value) in &self.formatted_pairs {
-            let formatted = self.formatted_rows.push_mut(RichText::new());
+        for (key, value) in &self.rows {
+            let formatted = self.formatted_rows.push_mut(Vec::new());
             rows_height += format_row(key, value, key_width, value_width, formatted);
         }
 
@@ -160,48 +150,79 @@ impl Widget for PropertyList {
     }
 }
 
-fn format_row(key: &RichText, value: &RichText, key_width: usize, value_width: usize, formatted: &mut RichText) -> usize {
-    let key = key.wrap(key_width);
-    let value = value.wrap(value_width);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Column {
+    Key,
+    Value,
+}
 
-    let max_lines = key.height().max(value.height()).max(1);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EditState {
+    column: Column,
+    cursor: Location,
+    row_index: usize,
+}
 
-    formatted.bottom_pad(max_lines);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Location {
+    lineno: usize,
+    column: usize,
+}
 
-    let mut key_style = DEFAULT_STYLE;
-    let mut value_style = DEFAULT_STYLE;
+// TODO: draw cursor when editing
+fn format_row(key: &str, value: &str, key_width: usize, value_width: usize, formatted: &mut Vec<String>) -> usize {
+    let key = wrap(key, key_width).collect::<Vec<_>>();
+    let value = wrap(value, value_width).collect::<Vec<_>>();
 
-    let row_width = key_width + 1 + value_width;
+    let max_lines = key.len().max(value.len()).max(1);
+
+    formatted.resize_with(max_lines, String::new);
+
+    let value_start = key_width + 1;
+    let row_width = value_start + value_width;
 
     for line_index in 0..max_lines {
-        let self_line = if let Some(self_line) = formatted.lines.get_mut(line_index) {
-            //self_style.apply_changes(self_line);
+        let self_line = if let Some(self_line) = formatted.get_mut(line_index) {
             self_line
         } else {
-            formatted.lines.push_mut(Vec::new())
+            formatted.push_mut(String::with_capacity(row_width))
         };
 
-        self_line.reserve(row_width);
-
-        value_style.diff(&key_style, self_line);
-        if let Some(key_line) = key.lines.get(line_index) {
-            self_line.extend_from_slice(key_line);
-            key_style.apply_changes(key_line);
+        let mut line_width = self_line.char_width_ignore_unprintable();
+        if line_width < row_width {
+            self_line.reserve(row_width - line_width);
         }
 
-        right_pad_line(self_line, key_width + 1);
-
-        key_style.diff(&value_style, self_line);
-        if let Some(value_line) = key.lines.get(line_index) {
-            self_line.extend_from_slice(value_line);
-            value_style.apply_changes(value_line);
+        if let Some(key_line) = key.get(line_index) {
+            self_line.push_str(key_line);
+            line_width += key_line.char_width_ignore_unprintable();
         }
 
-        right_pad_line_with(self_line, key_width + 1, row_width);
+        if value_start > line_width {
+            let diff = value_start - line_width;
+            self_line.reserve(diff);
+            for _ in 0..diff {
+                self_line.push(' ');
+            }
+            line_width = value_start;
+        }
+
+        if let Some(value_line) = value.get(line_index) {
+            self_line.push_str(value_line);
+            line_width += value_line.char_width_ignore_unprintable();
+        }
+
+        if row_width > line_width {
+            let diff = row_width - line_width;
+            self_line.reserve(diff);
+            for _ in 0..diff {
+                self_line.push(' ');
+            }
+            line_width = value_start;
+        }
     }
 
-    formatted.width = row_width;
-    formatted.height()
+    formatted.len()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
