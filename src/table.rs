@@ -81,11 +81,16 @@ fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText, ot
         let mut actual_line_width = line_width(self_line);
         let mut wanted_line_width = actual_line_width;
         let mut prev_style = &self_style;
+        let mut first = true;
 
         for ((other, other_style), column) in row.iter().zip(&mut other_styles[..]).zip(columns) {
             prev_style.diff(&other_style, self_line);
 
-            wanted_line_width += 1;
+            if first {
+                first = false;
+            } else {
+                wanted_line_width += 1;
+            }
 
             let column_width = column.width();
             if let Some(other_line) = other.lines.get(line_index) {
