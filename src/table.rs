@@ -1,14 +1,13 @@
-use crate::{color::Color, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle, line_width, right_pad_line_with}, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{ActionFlags, Widget, WidgetId, next_widget_id}};
+use crate::{color::Color, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle, line_width, right_pad_line_with}, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
+    widget_data: WidgetData,
     columns: Vec<Column>,
     header: Vec<RichText>,
     rows: Vec<Vec<RichText>>,
     formatted_header: RichText,
     formatted_rows: Vec<RichText>,
-    draw_rect: Rect,
-    widget_id: WidgetId,
     width: usize,
     rows_height: usize,
     selected_row_index: usize,
@@ -133,13 +132,12 @@ impl Table {
     #[inline]
     pub fn new() -> Self {
         Self {
+            widget_data: WidgetData::new(),
             columns: Vec::new(),
             header: Vec::new(),
             rows: Vec::new(),
             formatted_header: RichText::new(),
             formatted_rows: Vec::new(),
-            draw_rect: Rect::default(),
-            widget_id: next_widget_id(),
             width: 0,
             rows_height: 0,
             selected_row_index: 0,
@@ -151,6 +149,7 @@ impl Table {
     #[inline]
     pub fn with_data(header: impl Into<Vec<RichText>>, rows: impl Into<Vec<Vec<RichText>>>, align: &[Align]) -> Self {
         let mut table = Self {
+            widget_data: WidgetData::new(),
             columns: align.iter().cloned().map(Column::new).collect(),
             header: header.into(),
             rows: rows.into(),
@@ -161,8 +160,6 @@ impl Table {
             scroll_row: 0,
             scroll_column: 0,
             selected_row_index: 0,
-            widget_id: next_widget_id(),
-            draw_rect: Rect::default(),
         };
 
         table.update();
@@ -273,10 +270,10 @@ impl Table {
 
     pub fn clamp_scroll_row(&mut self) {
         let height = self.height();
-        if self.draw_rect.height as usize > height {
+        if self.widget_data.rect.height as usize > height {
             self.scroll_row = 0;
         } else {
-            let max_overflow = (height - self.draw_rect.height as usize) as u32;
+            let max_overflow = (height - self.widget_data.rect.height as usize) as u32;
 
             if self.scroll_row > max_overflow {
                 self.scroll_row = max_overflow;
@@ -285,10 +282,10 @@ impl Table {
     }
 
     pub fn clamp_scroll_column(&mut self) {
-        if self.draw_rect.width as usize > self.width {
+        if self.widget_data.rect.width as usize > self.width {
             self.scroll_column = 0;
         } else {
-            let max_overflow = (self.width - self.draw_rect.width as usize) as u32;
+            let max_overflow = (self.width - self.widget_data.rect.width as usize) as u32;
 
             if self.scroll_column > max_overflow {
                 self.scroll_column = max_overflow;
@@ -297,10 +294,10 @@ impl Table {
     }
 
     fn after_selection_up(&mut self) {
-        if self.header_height() >= self.draw_rect.height as usize {
+        if self.header_height() >= self.widget_data.rect.height as usize {
             self.scroll_row = 0;
         } else {
-            let avail_height = self.draw_rect.height as usize - self.header_height();
+            let avail_height = self.widget_data.rect.height as usize - self.header_height();
             let mut body_height = 0;
             let mut selected_top = 0;
             let mut selected_height = 0;
@@ -327,10 +324,10 @@ impl Table {
     }
 
     fn after_selection_down(&mut self) {
-        if self.header_height() >= self.draw_rect.height as usize {
+        if self.header_height() >= self.widget_data.rect.height as usize {
             self.scroll_row = 0;
         } else {
-            let avail_height = self.draw_rect.height as usize - self.header_height();
+            let avail_height = self.widget_data.rect.height as usize - self.header_height();
             let mut body_height = 0;
             let mut selected_top = 0;
             let mut selected_height = 0;
@@ -367,102 +364,163 @@ const FOREGROUND:               Color = Color::from_u32(0xFFFFFF);
 impl Widget for Table {
     #[inline]
     fn widget_id(&self) -> WidgetId {
-        self.widget_id
+        self.widget_data.widget_id
     }
 
     #[inline]
     fn draw_rect(&self) -> &Rect {
-        &self.draw_rect
+        &self.widget_data.rect
+    }
+
+    #[inline]
+    fn is_dirty(&self) -> bool {
+        self.widget_data.dirty
+    }
+
+    #[inline]
+    fn set_dirty(&mut self, dirty: bool) {
+        self.widget_data.dirty = dirty;
     }
 
     #[inline]
     fn set_draw_rect(&mut self, rect: &Rect) {
-        self.draw_rect = *rect;
-        self.clamp_scroll_row();
-        self.clamp_scroll_column();
+        if self.widget_data.rect != *rect {
+            self.widget_data.rect = *rect;
+            self.widget_data.dirty = true;
+            self.clamp_scroll_row();
+            self.clamp_scroll_column();
+        }
     }
 
-    fn draw(&self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
-        let Rect { row, column, width, height } = self.draw_rect;
-        let &Table { scroll_row, scroll_column, selected_row_index, .. } = self;
-        let row    = row    + parent_row;
-        let column = column + parent_column;
+    fn draw(&mut self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
+        if self.widget_data.dirty {
+            let Rect { row, column, width, height } = self.widget_data.rect;
 
-        let mut scoped_state = ScopedTermIOState::default_bg(termio, ODD_BACKGROUND);
-        let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), FOREGROUND);
-
-        {
-            scoped_state.termio_mut().font_weight(FontWeight::Bold)?;
-
-            let res = self.formatted_header.draw_cropped(
-                scoped_state.termio_mut(),
-                row,
-                column,
-                0,
-                scroll_column,
-                width,
-                height,
-            );
-
-            scoped_state.termio_mut().font_weight(FontWeight::Normal)?;
-
-            res?;
-        }
-
-        let header_height = self.formatted_header.height();
-
-        if (height as usize) < header_height {
-            return Ok(());
-        }
-
-        let mut body_height = 0;
-        let mut current_row_index = 0;
-
-        while current_row_index < self.formatted_rows.len() {
-            let row_height = self.formatted_rows[current_row_index].height();
-            if body_height as i32 + row_height as i32 - scroll_row as i32 >= header_height as i32 {
-                break;
+            if width == 0 || height == 0 {
+                self.widget_data.dirty = false;
+                return Ok(());
             }
 
-            body_height += row_height;
-            current_row_index += 1;
-        }
+            let &mut Table { scroll_row, scroll_column, selected_row_index, .. } = self;
+            let row    = row    + parent_row;
+            let column = column + parent_column;
 
-        let mut avail_height = height - header_height as u32 + scroll_row;
+            let mut scoped_state = ScopedTermIOState::default_bg(termio, ODD_BACKGROUND);
+            let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), FOREGROUND);
 
-        while current_row_index < self.formatted_rows.len() {
-            let table_row = &self.formatted_rows[current_row_index];
+            {
+                scoped_state.termio_mut().font_weight(FontWeight::Bold)?;
 
-            let mut scoped_state = ScopedTermIOState::default_bg(
-                scoped_state.termio_mut(),
-                if ((current_row_index + scroll_row as usize) & 1) == 0 {
-                    if current_row_index == selected_row_index { SELECTED_EVEN_BACKGROUND } else { EVEN_BACKGROUND }
-                } else {
-                    if current_row_index == selected_row_index { SELECTED_ODD_BACKGROUND } else { ODD_BACKGROUND }
+                let res = self.formatted_header.draw_cropped(
+                    scoped_state.termio_mut(),
+                    row,
+                    column,
+                    0,
+                    scroll_column,
+                    width,
+                    height,
+                );
+
+                scoped_state.termio_mut().font_weight(FontWeight::Normal)?;
+
+                res?;
+            }
+
+            let header_height = self.formatted_header.height();
+
+            if (height as usize) < header_height {
+                return Ok(());
+            }
+
+            let mut body_height = 0;
+            let mut current_row_index = 0;
+
+            while current_row_index < self.formatted_rows.len() {
+                let row_height = self.formatted_rows[current_row_index].height();
+                if body_height as i32 + row_height as i32 - scroll_row as i32 >= header_height as i32 {
+                    break;
                 }
-            );
 
-            let offset_body_height = body_height as i32 - scroll_row as i32;
+                body_height += row_height;
+                current_row_index += 1;
+            }
 
-            table_row.draw_cropped(
-                scoped_state.termio_mut(),
-                row + header_height as i32 + offset_body_height.max(0),
-                column,
-                -offset_body_height.min(0) as u32,
-                scroll_column,
-                width,
-                avail_height,
-            )?;
+            let mut avail_height = height - header_height as u32 + scroll_row;
 
-            current_row_index += 1;
+            while current_row_index < self.formatted_rows.len() {
+                let table_row = &self.formatted_rows[current_row_index];
 
-            let row_height = table_row.height();
-            body_height += row_height;
-            avail_height = if (avail_height as usize) > row_height {
-                avail_height - row_height as u32
-            } else {
-                break;
-            };
+                let mut scoped_state = ScopedTermIOState::default_bg(
+                    scoped_state.termio_mut(),
+                    if ((current_row_index + scroll_row as usize) & 1) == 0 {
+                        if current_row_index == selected_row_index { SELECTED_EVEN_BACKGROUND } else { EVEN_BACKGROUND }
+                    } else {
+                        if current_row_index == selected_row_index { SELECTED_ODD_BACKGROUND } else { ODD_BACKGROUND }
+                    }
+                );
+
+                let offset_body_height = body_height as i32 - scroll_row as i32;
+
+                table_row.draw_cropped(
+                    scoped_state.termio_mut(),
+                    row + header_height as i32 + offset_body_height.max(0),
+                    column,
+                    -offset_body_height.min(0) as u32,
+                    scroll_column,
+                    width,
+                    avail_height,
+                )?;
+
+                current_row_index += 1;
+
+                let row_height = table_row.height();
+                body_height += row_height;
+                avail_height = if (avail_height as usize) > row_height {
+                    avail_height - row_height as u32
+                } else {
+                    break;
+                };
+            }
+
+            if body_height < avail_height as usize {
+                let offset_body_height = body_height as i32 - scroll_row as i32;
+                let line_row = (row + header_height as i32 + offset_body_height.max(0)) as u32;
+                let line_column;
+                let line_width;
+
+                if column < 0 {
+                    line_column = 0;
+                    line_width = width - (-column) as u32;
+                } else {
+                    line_column = column as u32;
+                    line_width = width;
+                }
+
+                let termio = scoped_state.termio_mut();
+                let window_width = termio.window_size().columns;
+
+                if line_column < window_width {
+                    let line_width = if line_column + line_width > window_width {
+                        window_width - line_column
+                    } else {
+                        line_width
+                    };
+                    let repeat_count = line_width - 1;
+
+                    for line_index in 0..((avail_height as usize - body_height) as u32) {
+                        if line_index == 0 || line_column != 0 {
+                            termio.move_cursor(line_row + line_index, column as u32)?;
+                        } else {
+                            termio.write(b"\n")?;
+                        }
+
+                        termio.write(b" ")?;
+                        termio.repeat(repeat_count)?;
+                    }
+                }
+            }
+
+            self.set_dirty(false);
         }
 
         Ok(())
@@ -473,7 +531,7 @@ impl Widget for Table {
             Event::KeyPress { key: Key::Enter, alt: false, ctrl: false, shift: false } => {
                 if self.selected_row_index < self.rows.len() {
                     broker.dispatch(SelectTableRow {
-                        widget_id: self.widget_id,
+                        widget_id: self.widget_data.widget_id,
                         row_index: self.selected_row_index,
                     });
                 }
@@ -482,13 +540,15 @@ impl Widget for Table {
                 if alt {
                     if self.scroll_row > 0 {
                         self.scroll_row -= 1;
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                 } else if self.selected_row_index > 0 {
                     self.selected_row_index -= 1;
 
                     self.after_selection_up();
-                    return ActionFlags::Redraw;
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
                 }
             }
             Event::KeyPress { key: Key::Home, alt: false, ctrl: false, shift: false } => {
@@ -496,7 +556,8 @@ impl Widget for Table {
                     self.selected_row_index = 0;
 
                     self.after_selection_up();
-                    return ActionFlags::Redraw;
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
                 }
             }
             &Event::KeyPress { key: Key::Down, alt, ctrl: false, shift: false } => {
@@ -506,19 +567,22 @@ impl Widget for Table {
                         self.scroll_row += 1;
                         self.clamp_scroll_row();
                         if self.scroll_row != scroll_row {
-                            return ActionFlags::Redraw;
+                            self.widget_data.dirty = true;
+                            return ActionFlags::Dirty;
                         }
                     }
                 } else if self.formatted_rows.is_empty() {
                     if self.selected_row_index != 0 || self.scroll_row != 0 {
                         self.selected_row_index = 0;
                         self.scroll_row = 0;
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                 } else if self.selected_row_index < self.formatted_rows.len() - 1 {
                     self.selected_row_index += 1;
                     self.after_selection_down();
-                    return ActionFlags::Redraw;
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
                 }
             }
             Event::KeyPress { key: Key::End, alt: false, ctrl: false, shift: false } => {
@@ -526,18 +590,21 @@ impl Widget for Table {
                     if self.selected_row_index != 0 || self.scroll_row != 0 {
                         self.selected_row_index = 0;
                         self.scroll_row = 0;
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                 } else if self.selected_row_index < self.formatted_rows.len() - 1 {
                     self.selected_row_index = self.formatted_rows.len() - 1;
                     self.after_selection_down();
-                    return ActionFlags::Redraw;
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
                 }
             }
             Event::KeyPress { key: Key::Left, alt: false, ctrl: false, shift: false } => {
                 if self.scroll_column > 0 {
                     self.scroll_column -= 1;
-                    return ActionFlags::Redraw;
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
                 }
             }
             Event::KeyPress { key: Key::Right, alt: false, ctrl: false, shift: false } => {
@@ -546,40 +613,45 @@ impl Widget for Table {
                     self.scroll_column += 1;
                     self.clamp_scroll_column();
                     if self.scroll_column != scroll_column {
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                 }
             }
             Event::KeyPress { key: Key::Home, alt: false, ctrl: true, shift: false } => {
                 if self.scroll_column > 0 {
                     self.scroll_column = 0;
-                    return ActionFlags::Redraw;
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
                 }
             }
             Event::KeyPress { key: Key::End, alt: false, ctrl: true, shift: false } => {
                 if self.scroll_column < u32::MAX {
-                    if self.draw_rect.width as usize > self.width {
+                    if self.widget_data.rect.width as usize > self.width {
                         if self.scroll_column != 0 {
                             self.scroll_column = 0;
-                            return ActionFlags::Redraw;
+                            self.widget_data.dirty = true;
+                            return ActionFlags::Dirty;
                         }
                     } else {
-                        let max_overflow = (self.width - self.draw_rect.width as usize) as u32;
+                        let max_overflow = (self.width - self.widget_data.rect.width as usize) as u32;
                         if self.scroll_column != max_overflow {
                             self.scroll_column = max_overflow;
-                            return ActionFlags::Redraw;
+                            self.widget_data.dirty = true;
+                            return ActionFlags::Dirty;
                         }
                     }
                 }
             }
             Event::KeyPress { key: Key::PageUp, alt: false, ctrl: false, shift: false } => {
-                if self.header_height() >= self.draw_rect.height as usize {
+                if self.header_height() >= self.widget_data.rect.height as usize {
                     if self.scroll_row != 0 {
                         self.scroll_row = 0;
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                 } else if self.selected_row_index > 0 {
-                    let avail_height = self.draw_rect.height as usize - self.header_height();
+                    let avail_height = self.widget_data.rect.height as usize - self.header_height();
                     let mut body_height = 0;
                     let mut selected_top = 0;
 
@@ -608,22 +680,25 @@ impl Widget for Table {
                         // can't happen
                         if self.scroll_row != 0 {
                             self.scroll_row = 0;
-                            return ActionFlags::Redraw;
+                            self.widget_data.dirty = true;
+                            return ActionFlags::Dirty;
                         }
                     } else {
                         self.scroll_row -= scroll_diff as u32;
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                 }
             }
             Event::KeyPress { key: Key::PageDown, alt: false, ctrl: false, shift: false } => {
-                if self.header_height() >= self.draw_rect.height as usize {
+                if self.header_height() >= self.widget_data.rect.height as usize {
                     if self.scroll_row != 0 {
                         self.scroll_row = 0;
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                 } else if self.selected_row_index < self.formatted_rows.len() {
-                    let avail_height = self.draw_rect.height as usize - self.header_height();
+                    let avail_height = self.widget_data.rect.height as usize - self.header_height();
                     let mut body_height = 0;
                     let mut selected_top = 0;
 
@@ -651,7 +726,8 @@ impl Widget for Table {
                     if scroll_diff > 0 {
                         self.scroll_row += scroll_diff as u32;
                         self.clamp_scroll_row();
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                 }
             }

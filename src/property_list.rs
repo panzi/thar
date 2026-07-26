@@ -1,9 +1,8 @@
-use crate::{char_width::{CharWidth, wcs_max_width}, rect::Rect, widget::{Widget, WidgetId, next_widget_id}, wrap::wrap};
+use crate::{char_width::{CharWidth, wcs_max_width}, rect::Rect, widget::{Widget, WidgetData, WidgetId}, wrap::wrap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyList {
-    draw_rect: Rect,
-    widget_id: WidgetId,
+    widget_data: WidgetData,
     widths: (usize, usize),
     formatted_widths: (usize, usize),
     header: (String, String),
@@ -25,8 +24,7 @@ impl PropertyList {
     #[inline]
     pub fn new(key_header: String, value_header: String) -> Self {
         Self {
-            draw_rect: Rect::default(),
-            widget_id: next_widget_id(),
+            widget_data: WidgetData::new(),
             widths: (0, 0),
             formatted_widths: (0, 0),
             header: (key_header, value_header),
@@ -85,21 +83,21 @@ impl PropertyList {
         let mut key_width = self.widths.0;
         let mut value_width = self.widths.1;
 
-        if key_width + 1 + value_width > self.draw_rect.width as usize {
-            let half_width = self.draw_rect.width as usize / 2;
-            let half_width = if half_width + half_width < self.draw_rect.width as usize {
+        if key_width + 1 + value_width > self.widget_data.rect.width as usize {
+            let half_width = self.widget_data.rect.width as usize / 2;
+            let half_width = if half_width + half_width < self.widget_data.rect.width as usize {
                 half_width
             } else {
                 half_width - 1
             };
 
             if key_width <= half_width {
-                value_width = self.draw_rect.width as usize - 1 - key_width;
+                value_width = self.widget_data.rect.width as usize - 1 - key_width;
             } else if value_width <= half_width {
-                key_width = self.draw_rect.width as usize - 1 - value_width;
+                key_width = self.widget_data.rect.width as usize - 1 - value_width;
             } else {
                 key_width = half_width;
-                value_width = self.draw_rect.width as usize - 1 - key_width;
+                value_width = self.widget_data.rect.width as usize - 1 - key_width;
             }
         }
 
@@ -121,21 +119,34 @@ impl PropertyList {
 impl Widget for PropertyList {
     #[inline]
     fn draw_rect(&self) -> &Rect {
-        &self.draw_rect
+        &self.widget_data.rect
     }
 
     #[inline]
     fn set_draw_rect(&mut self, rect: &Rect) {
-        self.draw_rect = *rect;
-        self.postformat();
+        if self.widget_data.rect != *rect {
+            self.widget_data.rect = *rect;
+            self.widget_data.dirty = true;
+            self.postformat();
+        }
+    }
+
+    #[inline]
+    fn is_dirty(&self) -> bool {
+        self.widget_data.dirty
+    }
+
+    #[inline]
+    fn set_dirty(&mut self, dirty: bool) {
+        self.widget_data.dirty = dirty;
     }
 
     #[inline]
     fn widget_id(&self) -> WidgetId {
-        self.widget_id
+        self.widget_data.widget_id
     }
 
-    fn draw(&self, termio: &mut crate::termio::TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
+    fn draw(&mut self, termio: &mut crate::termio::TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
         unimplemented!()
     }
 

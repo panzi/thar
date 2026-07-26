@@ -1,4 +1,4 @@
-use crate::{color::Color, event::{Event, Key}, fields::{EntryField, Field, PageField}, rect::Rect, rich_text::RichText, schema::HAR, table::{SelectTableRow, Table}, tabs::{Tab, Tabs}, widget::{ActionFlags, Widget, WidgetId, next_widget_id}};
+use crate::{color::Color, event::{Event, Key}, fields::{EntryField, Field, PageField}, rect::Rect, rich_text::RichText, schema::HAR, table::{SelectTableRow, Table}, tabs::{Tab, Tabs}, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveView {
@@ -15,9 +15,8 @@ pub struct AppConfig<'a> {
 
 #[derive(Debug)]
 pub struct App {
+    widget_data: WidgetData,
     tabs: Tabs,
-    draw_rect: Rect,
-    widget_id: WidgetId,
     requests_table_id: WidgetId,
     pages_table_id: WidgetId,
     har: HAR,
@@ -81,8 +80,7 @@ impl App {
         ]);
 
         Self {
-            draw_rect: Rect::default(),
-            widget_id: next_widget_id(),
+            widget_data: WidgetData::new(),
             requests_table_id,
             pages_table_id,
             tabs,
@@ -95,43 +93,55 @@ impl App {
 impl Widget for App {
     #[inline]
     fn draw_rect(&self) -> &Rect {
-        &self.draw_rect
+        &self.widget_data.rect
     }
 
     #[inline]
     fn widget_id(&self) -> WidgetId {
-        self.widget_id
+        self.widget_data.widget_id
+    }
+
+    #[inline]
+    fn is_dirty(&self) -> bool {
+        self.widget_data.dirty
+    }
+
+    #[inline]
+    fn set_dirty(&mut self, dirty: bool) {
+        self.widget_data.dirty = dirty;
     }
 
     fn set_draw_rect(&mut self, rect: &Rect) {
-        self.draw_rect = *rect;
+        if self.widget_data.rect != *rect {
+            self.widget_data.rect = *rect;
+            self.widget_data.dirty = false;
 
-        let child_rect = Rect {
-            row: 0,
-            column: 0,
-            width: rect.width,
-            height: rect.height,
-        };
+            let child_rect = Rect {
+                row: 0,
+                column: 0,
+                width: rect.width,
+                height: rect.height,
+            };
 
-        match self.active_view {
-            ActiveView::Tabs => {
-                self.tabs.set_draw_rect(&child_rect);
-            }
-            ActiveView::Entry(_) => {
-                // TODO
-            }
-            ActiveView::Page(_) => {
-                // TODO
+            match self.active_view {
+                ActiveView::Tabs => {
+                    self.tabs.set_draw_rect(&child_rect);
+                }
+                ActiveView::Entry(_) => {
+                    // TODO
+                }
+                ActiveView::Page(_) => {
+                    // TODO
+                }
             }
         }
     }
 
-    fn draw(&self, termio: &mut crate::termio::TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
-        let row = self.draw_rect.row + parent_row;
-        let column = self.draw_rect.column + parent_column;
+    fn draw(&mut self, termio: &mut crate::termio::TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
+        let row = self.widget_data.rect.row + parent_row;
+        let column = self.widget_data.rect.column + parent_column;
 
         termio.clear_style()?;
-        termio.clear_screen()?;
 
         let res = match self.active_view {
             ActiveView::Tabs => {
@@ -150,9 +160,13 @@ impl Widget for App {
         termio.set_default_fg(Color::Default);
         termio.set_default_bg(Color::Default);
 
+        res?;
+
         termio.flush()?;
 
-        res
+        self.set_dirty(false);
+
+        Ok(())
     }
 
     fn handle_event(&mut self, event: &crate::event::Event, broker: &mut crate::message::MessageBroker) -> ActionFlags {
@@ -166,12 +180,14 @@ impl Widget for App {
                     ActiveView::Entry(_) => {
                         self.active_view = ActiveView::Tabs;
                         self.tabs.set_selected_tab_id(self.requests_table_id);
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                     ActiveView::Page(_) => {
                         self.active_view = ActiveView::Tabs;
                         self.tabs.set_selected_tab_id(self.pages_table_id);
-                        return ActionFlags::Redraw;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
                     }
                     _ => {}
                 }
@@ -201,7 +217,7 @@ impl Widget for App {
                 let view = ActiveView::Entry(row_index);
                 if view != self.active_view {
                     self.active_view = view;
-                    return ActionFlags::Redraw;
+                    return ActionFlags::Dirty;
                 } else {
                     return ActionFlags::None;
                 }
@@ -210,7 +226,7 @@ impl Widget for App {
                 let view = ActiveView::Page(row_index);
                 if view != self.active_view {
                     self.active_view = view;
-                    return ActionFlags::Redraw;
+                    return ActionFlags::Dirty;
                 } else {
                     return ActionFlags::None;
                 }

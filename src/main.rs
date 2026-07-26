@@ -109,6 +109,8 @@ fn main() -> std::io::Result<()> {
         running: true
     };
 
+    termio.clear_screen()?;
+
     app.draw(&mut termio, 0, 0)?;
 
     while let Some(event) = termio.wait()? {
@@ -122,7 +124,7 @@ fn main() -> std::io::Result<()> {
                     width: columns,
                     height: rows,
                 });
-                flags |= ActionFlags::Redraw;
+                flags |= ActionFlags::Dirty;
             }
             _ => {}
         }
@@ -134,7 +136,7 @@ fn main() -> std::io::Result<()> {
             break;
         }
 
-        if flags.contains(ActionFlags::Redraw) {
+        if flags.contains(ActionFlags::Dirty) {
             app.draw(&mut termio, 0, 0)?;
         }
     }

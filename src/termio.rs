@@ -420,6 +420,15 @@ impl TermIO {
         self.writer.write_all(CLEAR_LINE_TO_START)
     }
 
+    #[inline]
+    pub fn repeat(&mut self, count: u32) -> std::io::Result<()> {
+        if count > 0 {
+            write!(self.writer, "\x1B[{count}b")?;
+        }
+
+        Ok(())
+    }
+
     pub fn read_byte(&mut self) -> std::io::Result<Option<u8>> {
         if self.buffer_index < self.buffer_size {
             let byte = self.buffer[self.buffer_index];

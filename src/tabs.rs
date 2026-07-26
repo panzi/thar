@@ -1,4 +1,4 @@
-use crate::{color::{Color, Color16}, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::{ActionFlags, Widget, WidgetId, next_widget_id}};
+use crate::{color::{Color, Color16}, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{RichText, RichTextStyle}, style::TextDecoration, termio::TermIO, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
 
 #[derive(Debug)]
 pub struct Tab {
@@ -9,10 +9,9 @@ pub struct Tab {
 
 #[derive(Debug)]
 pub struct Tabs {
+    widget_data: WidgetData,
     tabs: Vec<Tab>,
     formatted_tabs: Vec<RichText>,
-    widget_id: WidgetId,
-    draw_rect: Rect,
     selected_tab_index: usize,
 }
 
@@ -20,10 +19,9 @@ impl Tabs {
     #[inline]
     pub fn new(tabs: impl Into<Vec<Tab>>) -> Self {
         let mut tabs = Self {
+            widget_data: WidgetData::new(),
             tabs: tabs.into(),
             formatted_tabs: Vec::new(),
-            widget_id: next_widget_id(),
-            draw_rect: Rect::default(),
             selected_tab_index: 0,
         };
         tabs.update();
@@ -74,48 +72,31 @@ impl Tabs {
 
     #[inline]
     pub fn set_selected_tab_index(&mut self, index: usize) {
-        if index < self.tabs.len() {
+        if index < self.tabs.len() && index != self.selected_tab_index {
+            let tab = &mut self.tabs[index];
+            tab.content.set_draw_rect(&Rect {
+                row: self.widget_data.rect.row + 1,
+                height: if self.widget_data.rect.height > 0 { self.widget_data.rect.height - 1 } else { 0 },
+                ..self.widget_data.rect
+            });
+            tab.content.set_dirty(true);
             self.selected_tab_index = index;
+            self.widget_data.dirty = true;
         }
     }
 
     #[inline]
     pub fn set_selected_tab_id(&mut self, widget_id: WidgetId) {
         if let Some(index) = self.tabs.iter().position(|tab| tab.content.widget_id() == widget_id) {
-            self.selected_tab_index = index;
-        }
-    }
-}
-
-impl Widget for Tabs {
-    #[inline]
-    fn widget_id(&self) -> WidgetId {
-        self.widget_id
-    }
-
-    #[inline]
-    fn draw_rect(&self) -> &Rect {
-        &self.draw_rect
-    }
-
-    #[inline]
-    fn set_draw_rect(&mut self, rect: &Rect) {
-        self.draw_rect = *rect;
-
-        if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
-            tab.content.set_draw_rect(&Rect {
-                row: rect.row + 1,
-                height: if rect.height > 0 { rect.height - 1 } else { 0 },
-                ..*rect
-            });
+            self.set_selected_tab_index(index);
         }
     }
 
-    fn draw(&self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
-        let row = self.draw_rect.row + parent_row;
-        let column = self.draw_rect.column + parent_column;
-
+    fn draw_tabs(&self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
         // TODO: cropping
+        let row = self.widget_data.rect.row + parent_row;
+        let column = self.widget_data.rect.column + parent_column;
+
         let mut tab_column = column;
         for (index, tab) in self.formatted_tabs.iter().enumerate() {
             if index != 0 {
@@ -131,10 +112,59 @@ impl Widget for Tabs {
 
         termio.set_inverted(false);
 
+        Ok(())
+    }
+}
+
+impl Widget for Tabs {
+    #[inline]
+    fn widget_id(&self) -> WidgetId {
+        self.widget_data.widget_id
+    }
+
+    #[inline]
+    fn draw_rect(&self) -> &Rect {
+        &self.widget_data.rect
+    }
+
+    #[inline]
+    fn is_dirty(&self) -> bool {
+        self.widget_data.dirty
+    }
+
+    #[inline]
+    fn set_dirty(&mut self, dirty: bool) {
+        self.widget_data.dirty = dirty;
+    }
+
+    #[inline]
+    fn set_draw_rect(&mut self, rect: &Rect) {
+        if self.widget_data.rect != *rect {
+            self.widget_data.rect = *rect;
+            self.widget_data.dirty = true;
+
+            if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
+                tab.content.set_draw_rect(&Rect {
+                    row: rect.row + 1,
+                    height: if rect.height > 0 { rect.height - 1 } else { 0 },
+                    ..*rect
+                });
+                tab.content.set_dirty(true);
+            }
+        }
+    }
+
+    fn draw(&mut self, termio: &mut TermIO, parent_row: i32, parent_column: i32) -> std::io::Result<()> {
+        if self.widget_data.dirty {
+            self.draw_tabs(termio, parent_row, parent_column)?;
+        }
+
         if self.selected_tab_index < self.tabs.len() {
-            let child = &self.tabs[self.selected_tab_index].content;
+            let child = &mut self.tabs[self.selected_tab_index].content;
             child.draw(termio, parent_row, parent_column)?;
         }
+
+        self.widget_data.dirty = false;
 
         Ok(())
     }
@@ -143,14 +173,11 @@ impl Widget for Tabs {
         if let Event::KeyPress { key: Key::Char(ch), ctrl: false, alt: true, shift: false } = event {
             for (index, tab) in self.tabs.iter_mut().enumerate() {
                 if tab.mnemonic.eq_ignore_ascii_case(ch) {
-                    self.selected_tab_index = index;
-
-                    tab.content.set_draw_rect(&Rect {
-                        row: self.draw_rect.row + 1,
-                        height: if self.draw_rect.height > 0 { self.draw_rect.height - 1 } else { 0 },
-                        ..self.draw_rect
-                    });
-                    return ActionFlags::Redraw;
+                    if self.selected_tab_index == index {
+                        return ActionFlags::None;
+                    }
+                    self.set_selected_tab_index(index);
+                    return ActionFlags::Dirty;
                 }
             }
         }

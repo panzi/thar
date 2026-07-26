@@ -663,6 +663,8 @@ impl RichText {
         let mut crop_row_end = crop_row + crop_height as usize;
         let mut crop_column_end = crop_column + crop_width as usize;
 
+        let mut full_column_end = crop_column_end;
+
         if crop_row_end > self.height() {
             crop_row_end = self.height();
         }
@@ -680,6 +682,10 @@ impl RichText {
         }
 
         let window_size = *termio.window_size();
+
+        if full_column_end > window_size.columns as usize {
+            full_column_end = window_size.columns as usize;
+        }
 
         let term_row;
         let term_column;
@@ -793,6 +799,21 @@ impl RichText {
                         line_width += text_width;
                     }
                 }
+            }
+
+            if line_width < full_column_end {
+                if !moved {
+                    if !first && term_column == 0 && prev_line_index + 1 == line_index {
+                        termio.write_str("\n")?;
+                    } else {
+                        first = false;
+                        termio.move_cursor(term_row + line_index as u32, term_column)?;
+                    }
+                    prev_line_index = line_index;
+                }
+
+                termio.write(b" ")?;
+                termio.repeat((full_column_end - line_width) as u32 - 1)?;
             }
         }
 
