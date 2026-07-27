@@ -1,4 +1,4 @@
-use crate::{color::Color, event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle, line_width, right_pad_line_with}, style::{FontWeight, ScopedTermIOState}, termio::TermIO, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
+use crate::{event::{Event, Key}, message::MessageBroker, rect::Rect, rich_text::{RichText, RichTextStyle, line_width, right_pad_line_with}, style::{FontWeight, ScopedTermIOState}, styles::{DEFAULT_STYLE, EVEN_ROW_BACKGROUND, ODD_ROW_BACKGROUND, SELECTED_EVEN_ROW_BACKGROUND, SELECTED_ODD_ROW_BACKGROUND, TABLE_FOREGROUND}, termio::TermIO, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
@@ -355,12 +355,6 @@ impl Table {
     }
 }
 
-const EVEN_BACKGROUND:          Color = Color::from_u32(0x111111);
-const ODD_BACKGROUND:           Color = Color::from_u32(0x000000);
-const SELECTED_EVEN_BACKGROUND: Color = Color::from_u32(0x333333);
-const SELECTED_ODD_BACKGROUND:  Color = Color::from_u32(0x222222);
-const FOREGROUND:               Color = Color::from_u32(0xFFFFFF);
-
 impl Widget for Table {
     #[inline]
     fn widget_id(&self) -> WidgetId {
@@ -405,8 +399,8 @@ impl Widget for Table {
             let row    = row    + parent_row;
             let column = column + parent_column;
 
-            let mut scoped_state = ScopedTermIOState::default_bg(termio, ODD_BACKGROUND);
-            let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), FOREGROUND);
+            let mut scoped_state = ScopedTermIOState::default_bg(termio, ODD_ROW_BACKGROUND);
+            let mut scoped_state = ScopedTermIOState::default_fg(scoped_state.termio_mut(), TABLE_FOREGROUND);
 
             {
                 scoped_state.termio_mut().font_weight(FontWeight::Bold)?;
@@ -453,9 +447,9 @@ impl Widget for Table {
                 let mut scoped_state = ScopedTermIOState::default_bg(
                     scoped_state.termio_mut(),
                     if ((current_row_index + scroll_row as usize) & 1) == 0 {
-                        if current_row_index == selected_row_index { SELECTED_EVEN_BACKGROUND } else { EVEN_BACKGROUND }
+                        if current_row_index == selected_row_index { SELECTED_EVEN_ROW_BACKGROUND } else { EVEN_ROW_BACKGROUND }
                     } else {
-                        if current_row_index == selected_row_index { SELECTED_ODD_BACKGROUND } else { ODD_BACKGROUND }
+                        if current_row_index == selected_row_index { SELECTED_ODD_ROW_BACKGROUND } else { ODD_ROW_BACKGROUND }
                     }
                 );
 

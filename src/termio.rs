@@ -1056,6 +1056,33 @@ impl std::fmt::Write for TermIO {
     }
 }
 
+impl std::io::Write for TermIO {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.writer.write(buf)
+    }
+
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
+
+    #[inline]
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.writer.write_all(buf)
+    }
+
+    #[inline]
+    fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
+        self.writer.write_fmt(args)
+    }
+
+    #[inline]
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        self.writer.write_vectored(bufs)
+    }
+}
+
 impl Drop for TermIO {
     fn drop(&mut self) {
         let _ = unsafe { libc::tcsetattr(self.rfd, libc::TCSANOW, &self.orig_termios) };

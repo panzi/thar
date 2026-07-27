@@ -34,8 +34,22 @@ pub fn wcswidth_ignore_unprintable(s: &str) -> usize {
     swidth
 }
 
+pub fn wcswidth_control_is_one(s: &str) -> usize {
+    let mut swidth: usize = 0;
 
-#[inline]
+    for ch in s.chars() {
+        let cwidth = unsafe { wcwidth(ch as libc::wchar_t) };
+
+        if cwidth > 0 {
+            swidth += cwidth as usize;
+        } else if ch.is_ascii_control() {
+            swidth += 1;
+        }
+    }
+
+    swidth
+}
+
 pub fn wcs_max_width(s: &str) -> usize {
     let mut maxwidth: usize = 0;
     let mut swidth: usize = 0;
@@ -62,6 +76,33 @@ pub fn wcs_max_width(s: &str) -> usize {
     maxwidth
 }
 
+pub fn wcs_max_width_control_is_one(s: &str) -> usize {
+    let mut maxwidth: usize = 0;
+    let mut swidth: usize = 0;
+
+    for ch in s.chars() {
+        if ch == '\n' {
+            if swidth > maxwidth {
+                maxwidth = swidth;
+                swidth = 0;
+            }
+        } else {
+            let cwidth = unsafe { wcwidth(ch as libc::wchar_t) };
+
+            if cwidth > 0 {
+                swidth += cwidth as usize;
+            } else if ch.is_ascii_control() {
+                swidth += 1;
+            }
+        }
+    }
+
+    if swidth > maxwidth {
+        maxwidth = swidth;
+    }
+
+    maxwidth
+}
 pub fn right_pad_line(text: &mut String, width: usize) {
     let text_width = text.char_width_ignore_unprintable();
     if text_width < width {

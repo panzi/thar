@@ -8,6 +8,7 @@ pub mod borrowed_fd;
 pub mod color;
 pub mod char_width;
 pub mod style;
+pub mod styles;
 pub mod rich_text;
 pub mod fields;
 pub mod table;

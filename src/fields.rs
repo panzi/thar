@@ -1,4 +1,4 @@
-use crate::{char_width::CharWidth, color::{Color, Color16}, colorize::{colorize_json, colorize_sgml}, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, table::{Align, ColumnDef}};
+use crate::{char_width::CharWidth, color::Color, colorize::{colorize_json, colorize_sgml}, rich_text::{RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, styles::FIELD_ERROR_STYLE, table::{Align, ColumnDef}};
 
 use std::{cmp::Ordering, fmt::Write, marker::PhantomData};
 
@@ -812,11 +812,6 @@ impl<'a> TryFrom<&'a str> for ResponseField {
     }
 }
 
-const ERROR_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::Color16(Color16::Red),
-    ..DEFAULT_STYLE
-};
-
 impl Field for ResponseField {
     type Value = Response;
 
@@ -893,7 +888,7 @@ impl Field for ResponseField {
             },
             Self::_Error => {
                 if let Some(error) = &response._error {
-                    rich_text.append_text(&ERROR_STYLE, error);
+                    rich_text.append_text(&FIELD_ERROR_STYLE, error);
                 }
             },
             Self::_FetchedViaServiceWorker => {

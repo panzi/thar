@@ -1,4 +1,4 @@
-use crate::{color::Color, rich_text::{DEFAULT_STYLE, RichText, RichTextStyle}};
+use crate::{rich_text::RichText, styles::{ATTR_STYLE, COMMENT_STYLE, DOCTYPE_STYLE, ERROR_STYLE, ESCAPE_STYLE, KEYWORD_STYLE, NUMBER_STYLE, STRING_STYLE, SYMBOL_STYLE, TAG_STYLE}};
 
 fn skipws(text: &str, index: usize) -> usize {
     let Some(sub_index) = text[index..].find(|ch: char| !ch.is_whitespace()) else {
@@ -19,57 +19,6 @@ fn find_ok_json_char(text: &str, index: usize) -> usize {
 
     index + sub_index
 }
-
-const ERROR_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0xFFFFFF),
-    background: Color::from_u32(0xFF2200),
-    ..DEFAULT_STYLE
-};
-
-const NUMBER_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0x00FF00),
-    ..DEFAULT_STYLE
-};
-
-const SYMBOL_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0x0088FF),
-    ..DEFAULT_STYLE
-};
-
-const KEYWORD_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0x00FFFF),
-    ..DEFAULT_STYLE
-};
-
-const STRING_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0xFF5500),
-    ..DEFAULT_STYLE
-};
-
-const ESCAPE_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0xFFAA00),
-    ..DEFAULT_STYLE
-};
-
-const COMMENT_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0xAAAAAA),
-    ..DEFAULT_STYLE
-};
-
-const DOCTYPE_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0x00FF00),
-    ..DEFAULT_STYLE
-};
-
-const TAG_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0xFFAA00),
-    ..DEFAULT_STYLE
-};
-
-const ATTR_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::from_u32(0x00AAFF),
-    ..DEFAULT_STYLE
-};
 
 fn colorize_string(text: &str, mut index: usize, rich_text: &mut RichText) -> usize {
     let mut prev = index;

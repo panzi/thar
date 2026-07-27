@@ -1,4 +1,4 @@
-use crate::{ansi_codes::{write_bg, write_fg}, char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, Style, TextDecoration}, termio::TermIO, wrap::LineWrapper};
+use crate::{ansi_codes::{write_bg, write_fg}, char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, Style, TextDecoration}, styles::{CONTROL_STYLE, DEFAULT_STYLE}, termio::TermIO, wrap::LineWrapper};
 
 use bitflags::bitflags;
 
@@ -993,19 +993,6 @@ fn parse_color_attr(rich_text: &str, mut index: usize) -> Result<(usize, Color),
         Ok((index, color))
     }
 }
-
-pub const DEFAULT_STYLE: RichTextStyle = RichTextStyle {
-    font_weight: FontWeight::Normal,
-    text_decoration: TextDecoration::None,
-    font_style: FontStyle::Normal,
-    foreground: Color::Default,
-    background: Color::Default,
-};
-
-pub const CONTROL_STYLE: RichTextStyle = RichTextStyle {
-    foreground: Color::Color16(Color16::Blue),
-    ..DEFAULT_STYLE
-};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RichTextStyle {
