@@ -14,6 +14,7 @@ pub mod char_width;
 pub mod style;
 pub mod styles;
 pub mod rich_text;
+pub mod plain_text;
 pub mod fields;
 pub mod table;
 pub mod widget;

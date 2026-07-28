@@ -118,6 +118,7 @@ fn format_row(columns: &[Column], row: &[RichText], formatted: &mut RichText, ot
     if !columns.is_empty() {
         formatted.width += columns.len() - 1;
     }
+
     formatted.height()
 }
 

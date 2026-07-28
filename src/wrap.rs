@@ -78,13 +78,6 @@ impl<'a> Iterator for LineWrapper<'a> {
 
             if line_width + word_width <= self.wrap_width {
                 line_width += word_width;
-
-                if line_width == self.wrap_width {
-                    let line = &self.text[..index];
-                    self.text = self.text[index..].trim_start();
-                    self.prefix_width = 0;
-                    return Some(line);
-                }
             } else {
                 index = prev;
 
