@@ -13,7 +13,7 @@ impl PlainTextItem {
     pub fn width(&self) -> usize {
         match self {
             PlainTextItem::Newline => 0,
-            PlainTextItem::Special(_) => 1,
+            PlainTextItem::Special(..) => 1,
             PlainTextItem::Text { width, .. } => *width,
         }
     }
@@ -187,6 +187,8 @@ impl PlainText {
                 }
 
                 line_width = 0;
+                prev_width = 0;
+                prev_index = index + 1;
                 line = self.lines.push_mut(Vec::new());
             } else if ch.is_ascii_control() {
                 if prev_index < index {
@@ -444,13 +446,13 @@ impl PlainText {
                             unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }
                         };
 
-                        line_width += 1;
-
-                        if line_width >= crop_column && line_width < crop_column_end {
+                        if line_width >= crop_column && line_width + 1 < crop_column_end {
                             DEFAULT_STYLE.write_diff(&CONTROL_STYLE, termio)?;
                             termio.write_str(display_char.encode_utf8(&mut [0; char::MAX_LEN_UTF8]))?;
                             CONTROL_STYLE.write_diff(&DEFAULT_STYLE, termio)?;
                         }
+
+                        line_width += 1;
                     }
                     PlainTextItem::Text { text, width: text_width } => {
                         let text_width = *text_width;
@@ -550,6 +552,28 @@ impl PlainText {
         }
     }
 
+    /// Number of bytes that will be written by [Self::write()].
+    pub fn write_len(&self) -> usize {
+        let mut len = 0;
+
+        for line in &self.lines {
+            for item in line {
+                match item {
+                    PlainTextItem::Special(_) => {
+                        len += 1;
+                    }
+                    PlainTextItem::Text { text, .. } => {
+                        len += text.len();
+                    }
+                    PlainTextItem::Newline => {}
+                }
+            }
+            len += 1;
+        }
+
+        len
+    }
+
     pub fn unwrap(&self) -> Self {
         let mut new_lines = Vec::new();
         let mut last_line: Option<&mut Vec<PlainTextItem>> = None;
@@ -590,6 +614,15 @@ impl PlainText {
 
         Self { lines: new_lines, width }
     }
+
+    #[inline]
+    pub fn to_string(&self) -> String {
+        let mut buf = String::with_capacity(self.write_len());
+
+        self.write(&mut buf);
+
+        buf
+    }
 }
 
 pub fn line_width(line: &[PlainTextItem]) -> usize {
@@ -600,4 +633,25 @@ pub fn line_width(line: &[PlainTextItem]) -> usize {
     }
 
     line_width
+}
+
+impl From<&str> for PlainText {
+    #[inline]
+    fn from(value: &str) -> Self {
+        Self::parse(value)
+    }
+}
+
+impl From<String> for PlainText {
+    #[inline]
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<&PlainText> for String {
+    #[inline]
+    fn from(value: &PlainText) -> Self {
+        value.to_string()
+    }
 }

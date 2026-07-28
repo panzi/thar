@@ -1,10 +1,9 @@
-use thar::{color::Color16, event::{Event, Key}, rich_text::{RichText, RichTextStyle}, termio};
-
+use thar::{event::{Event, Key}, plain_text::PlainText, termio};
 
 fn main() -> std::io::Result<()> {
     let mut args = std::env::args();
 
-    let rich_text = if args.len() > 1 {
+    let plain_text = if args.len() > 1 {
         args.next();
 
         let mut buf = String::new();
@@ -18,24 +17,17 @@ fn main() -> std::io::Result<()> {
         buf
     } else {
         "\
-[b][color=red]Hello[/color] [i][color=#cccc00]World![/color][/i][/b]
-[bg=magenta]FOO [bg=green]BAR[/bg] BAZ[/bg][bg=yellow] BLA[/bg] [bg=red]BLUB[/bg]
+Hello World!
+Control characters:
+\x00 \x01 \x02 \x03 \x04 \x05 \x06 \x07 \x08 \x09   \x0B \x0C \x0D \x0E \x0F
+\x10 \x11 \x12 \x13 \x14 \x15 \x16 \x17 \x18 \x19 \x1A \x1B \x1C \x1D \x1E \x1F
+\x7F
 This is a long line demonstrating how things are truncated.
-A second long line to verify this works for all lines.
+A second long line to verify this works for all lines that is even longer.
 A last line.".to_string()
     };
 
-    //let rich_text = "[bg=black][color=white][u]R[/u]equests[/color][/bg]";
-    //let rich_text = "[u]R[/u]equests";
-    let mut rich_text = match RichText::parse(&rich_text) {
-        Ok(rich_text) => rich_text,
-        Err(error) => {
-            eprintln!("{:#?}\n{error}", error.location());
-            error.print_line(&rich_text, &mut std::io::stderr())?;
-            std::process::exit(1);
-        }
-    };
-    //rich_text.append_plain_text(&format!("\n{:#?}", rich_text));
+    let mut plain_text = PlainText::parse(&plain_text);
 
     let mut termio = termio::TermIO::from_stdio()?;
 
@@ -43,9 +35,9 @@ A last line.".to_string()
     let mut row = 0;
 
     {
-        let mut rich_text = rich_text.clone();
-        rich_text.append_plain_text(&format!("\nrow: {row}, column: {column}"));
-        rich_text.draw(&mut termio, row, column)?;
+        let mut plain_text = plain_text.clone();
+        plain_text.append(&format!("\nrow: {row}, column: {column}"));
+        plain_text.draw(&mut termio, row, column)?;
         termio.flush()?;
     }
 
@@ -71,23 +63,20 @@ A last line.".to_string()
                 termio.invert();
             }
             _ => {
-                rich_text.append_text(
-                    &RichTextStyle::build().foreground(Color16::Red.into()).into_inner(),
-                    format!("\n{:?}", event).trim_end()
-                );
+                plain_text.append(format!("\n{:?}", event).trim_end());
             }
         }
 
         termio.clear_screen()?;
         termio.flush()?;
-        let mut rich_text = rich_text.clone();
-        rich_text.append_plain_text(&format!("\nrow: {row}, column: {column}"));
-        rich_text.draw(&mut termio, row, column)?;
+        let mut plain_text = plain_text.clone();
+        plain_text.append(&format!("\nrow: {row}, column: {column}"));
+        plain_text.draw(&mut termio, row, column)?;
         termio.flush()?;
     }
 
     drop(termio);
-    println!("{:#?}", rich_text);
+    println!("{:#?}", plain_text);
 
     Ok(())
 }
