@@ -182,6 +182,8 @@ impl PlainText {
                     }
                 }
 
+                line.push(PlainTextItem::Newline);
+
                 if line_width > self.width {
                     self.width = line_width;
                 }
