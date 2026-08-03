@@ -1,4 +1,4 @@
-use crate::{color::Color, event::{Event, Key}, fields::{EntryField, Field, PageField}, rect::Rect, rich_text::RichText, schema::HAR, table::{SelectTableRow, Table}, tabs::{Tab, Tabs}, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
+use crate::{color::Color, event::{Event, Key}, fields::{EntryField, Field, PageField}, property_list::SetProperties, rect::Rect, request_view::RequestView, rich_text::RichText, schema::HAR, table::{SelectTableRow, Table}, tabs::{Tab, Tabs}, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveView {
@@ -21,6 +21,7 @@ pub struct App {
     pages_table_id: WidgetId,
     har: HAR,
     active_view: ActiveView,
+    request_view: RequestView,
 }
 
 impl App {
@@ -86,6 +87,7 @@ impl App {
             tabs,
             har,
             active_view: ActiveView::Tabs,
+            request_view: RequestView::new(),
         }
     }
 }
@@ -128,7 +130,7 @@ impl Widget for App {
                     self.tabs.set_draw_rect(&child_rect);
                 }
                 ActiveView::Entry(_) => {
-                    // TODO
+                    self.request_view.set_draw_rect(&child_rect);
                 }
                 ActiveView::Page(_) => {
                     // TODO
@@ -148,12 +150,12 @@ impl Widget for App {
                 self.tabs.draw(termio, row, column)
             }
             ActiveView::Entry(index) => {
-                let text = RichText::from_plain_text(&format!("TODO: Request {index}"));
-                text.draw(termio, row, column)
+                self.request_view.draw(termio, row, column)
             }
             ActiveView::Page(index) => {
                 let text = RichText::from_plain_text(&format!("TODO: Page {index}"));
-                text.draw(termio, row, column)
+                text.draw(termio, row, column)?;
+                termio.clear_line_to_end()
             }
         };
 
@@ -199,8 +201,8 @@ impl Widget for App {
             ActiveView::Tabs => {
                 return event.send_to(&mut self.tabs, broker);
             }
-            ActiveView::Entry(index) => {
-                // TODO
+            ActiveView::Entry(_) => {
+                return event.send_to(&mut self.request_view, broker);
             }
             ActiveView::Page(index) => {
                 // TODO
@@ -214,12 +216,22 @@ impl Widget for App {
         if let Some(&SelectTableRow { widget_id, row_index }) = message.data() {
             if widget_id == self.requests_table_id {
                 message.stop_propergation();
-                let view = ActiveView::Entry(row_index);
-                if view != self.active_view {
-                    self.active_view = view;
-                    return ActionFlags::Dirty;
-                } else {
-                    return ActionFlags::None;
+                if row_index < self.har.log.entries.len() {
+                    let view = ActiveView::Entry(row_index);
+                    if view != self.active_view {
+                        self.active_view = view;
+
+                        broker.dispatch(SetProperties {
+                            widget_id: self.request_view.request_headers_id(),
+                            properties: self.har.log.entries[row_index].request.headers.iter()
+                                .map(|header| (header.name.to_string(), header.value.to_string()))
+                                .collect::<Vec<_>>()
+                        });
+
+                        return ActionFlags::Dirty;
+                    } else {
+                        return ActionFlags::None;
+                    }
                 }
             } else if widget_id == self.pages_table_id {
                 message.stop_propergation();
@@ -233,13 +245,24 @@ impl Widget for App {
             }
         }
 
-        let flags = self.tabs.handle_message(message, broker);
+        let mut flags = ActionFlags::None;
 
-        if self.active_view == ActiveView::Tabs {
-            return flags;
+        let tabs_flags = self.tabs.handle_message(message, broker);
+        let entry_flags = self.request_view.handle_message(message, broker);
+
+        match &self.active_view {
+            ActiveView::Tabs => {
+                flags = tabs_flags;
+            }
+            ActiveView::Entry(_) => {
+                flags = entry_flags;
+            }
+            ActiveView::Page(_) => {
+                // TODO
+            }
         }
 
-        ActionFlags::None
+        flags
     }
 }
 

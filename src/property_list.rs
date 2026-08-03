@@ -1,4 +1,4 @@
-use crate::{char_width::{CharWidth, wcs_max_width_control_is_one}, plain_text::{PlainText, PlainTextItem, line_width}, rect::Rect, style::{FontWeight, ScopedTermIOState}, styles::{EVEN_ROW_BACKGROUND, ODD_ROW_BACKGROUND, SELECTED_EVEN_ROW_BACKGROUND, SELECTED_ODD_ROW_BACKGROUND, TABLE_FOREGROUND}, termio::TermIO, widget::{Widget, WidgetData, WidgetId}, wrap::wrap};
+use crate::{char_width::{CharWidth, wcs_max_width_control_is_one}, event::{Event, Key}, message::Message, plain_text::{PlainText, PlainTextItem, line_width}, rect::Rect, style::{FontWeight, ScopedTermIOState}, styles::{EVEN_ROW_BACKGROUND, ODD_ROW_BACKGROUND, SELECTED_EVEN_ROW_BACKGROUND, SELECTED_ODD_ROW_BACKGROUND, TABLE_FOREGROUND}, termio::TermIO, widget::{ActionFlags, Widget, WidgetData, WidgetId}, wrap::wrap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyList {
@@ -22,12 +22,12 @@ pub struct PropertyList {
 
 impl PropertyList {
     #[inline]
-    pub fn new(key_header: String, value_header: String) -> Self {
+    pub fn new(key_header: impl Into<String>, value_header: impl Into<String>) -> Self {
         Self {
             widget_data: WidgetData::new(),
             widths: (0, 0),
             formatted_widths: (0, 0),
-            header: (key_header, value_header),
+            header: (key_header.into(), value_header.into()),
             rows: Vec::new(),
             formatted_header: PlainText::new(),
             formatted_rows: Vec::new(),
@@ -41,6 +41,16 @@ impl PropertyList {
     }
 
     #[inline]
+    pub fn rows(&self) -> &[(String, String)] {
+        &self.rows
+    }
+
+    #[inline]
+    pub fn rows_mut(&mut self) -> &mut Vec<(String, String)> {
+        &mut self.rows
+    }
+
+    #[inline]
     pub fn header_height(&self) -> usize {
         self.header_height
     }
@@ -51,9 +61,31 @@ impl PropertyList {
     }
 
     #[inline]
+    pub fn width(&self) -> usize {
+        let (key_width, value_width) = self.widths;
+        key_width + 1 + value_width
+    }
+
+    #[inline]
+    pub fn height(&self) -> usize {
+        self.header_height + self.rows_height
+    }
+
+    #[inline]
+    pub fn scroll_row(&self) -> u32 {
+        self.scroll_row
+    }
+
+    #[inline]
+    pub fn selected_row_index(&self) -> usize {
+        self.selected_row_index
+    }
+
+    #[inline]
     pub fn update(&mut self) {
         self.preformat();
         self.postformat();
+        self.widget_data.dirty = true;
     }
 
     pub fn preformat(&mut self) {
@@ -80,24 +112,29 @@ impl PropertyList {
         self.formatted_header.clear();
         self.formatted_rows.clear();
 
-        let mut key_width = self.widths.0;
-        let mut value_width = self.widths.1;
+        let (mut key_width, mut value_width) = self.widths;
 
-        if key_width + 1 + value_width > self.widget_data.rect.width as usize {
+        let widget_width = self.widget_data.rect.width as usize;
+
+        if key_width + 1 + value_width > widget_width {
             let half_width = self.widget_data.rect.width as usize / 2;
-            let half_width = if half_width + half_width < self.widget_data.rect.width as usize {
+            let half_width = if half_width + half_width < widget_width {
                 half_width
-            } else {
+            } else if half_width > 0 {
                 half_width - 1
+            } else {
+                0
             };
 
+            let avail_width = if widget_width > 0 { widget_width - 1 } else { 0 };
+
             if key_width <= half_width {
-                value_width = self.widget_data.rect.width as usize - 1 - key_width;
+                value_width = avail_width.saturating_sub(key_width);
             } else if value_width <= half_width {
-                key_width = self.widget_data.rect.width as usize - 1 - value_width;
+                key_width = avail_width.saturating_sub(value_width);
             } else {
                 key_width = half_width;
-                value_width = self.widget_data.rect.width as usize - 1 - key_width;
+                value_width = avail_width.saturating_sub(key_width);
             }
         }
 
@@ -113,8 +150,81 @@ impl PropertyList {
 
         self.rows_height = rows_height;
     }
-}
 
+    pub fn clamp_scroll_row(&mut self) {
+        let height = self.height();
+        if self.widget_data.rect.height as usize > height {
+            self.scroll_row = 0;
+        } else {
+            let max_overflow = (height - self.widget_data.rect.height as usize) as u32;
+
+            if self.scroll_row > max_overflow {
+                self.scroll_row = max_overflow;
+            }
+        }
+    }
+
+    fn after_selection_up(&mut self) {
+        if self.header_height() >= self.widget_data.rect.height as usize {
+            self.scroll_row = 0;
+        } else {
+            let avail_height = self.widget_data.rect.height as usize - self.header_height();
+            let mut body_height = 0;
+            let mut selected_top = 0;
+            let mut selected_height = 0;
+
+            for (index, row) in self.formatted_rows.iter().enumerate() {
+                if index == self.selected_row_index {
+                    selected_top = body_height;
+                    selected_height = row.height();
+                    break;
+                }
+                body_height += row.height();
+            }
+
+            if selected_top < self.scroll_row as usize {
+                self.scroll_row = selected_top as u32;
+            } else if selected_top + selected_height > self.scroll_row as usize + avail_height {
+                if selected_height > avail_height {
+                    self.scroll_row = selected_top as u32;
+                } else {
+                    self.scroll_row = (selected_top + selected_height - avail_height) as u32;
+                }
+            }
+        }
+    }
+
+    fn after_selection_down(&mut self) {
+        if self.header_height() >= self.widget_data.rect.height as usize {
+            self.scroll_row = 0;
+        } else {
+            let avail_height = self.widget_data.rect.height as usize - self.header_height();
+            let mut body_height = 0;
+            let mut selected_top = 0;
+            let mut selected_height = 0;
+
+            for (index, row) in self.formatted_rows.iter().enumerate() {
+                if index == self.selected_row_index {
+                    selected_top = body_height;
+                    selected_height = row.height();
+                    break;
+                } else {
+                    body_height += row.height();
+                }
+            }
+
+            if selected_top + selected_height > self.scroll_row as usize + avail_height {
+                if selected_height > avail_height {
+                    self.scroll_row = selected_top as u32;
+                } else {
+                    self.scroll_row = (selected_top + selected_height - avail_height) as u32;
+                }
+            } else if selected_top < self.scroll_row as usize {
+                self.scroll_row = selected_top as u32;
+            }
+        }
+    }
+}
 
 impl Widget for PropertyList {
     #[inline]
@@ -281,11 +391,175 @@ impl Widget for PropertyList {
     }
 
     fn handle_event(&mut self, event: &crate::event::Event, broker: &mut crate::message::MessageBroker) -> crate::widget::ActionFlags {
-        unimplemented!()
+        match event {
+            // TODO: Key::Enter
+            &Event::KeyPress { key: Key::Up, alt, ctrl: false, shift: false } => {
+                if alt {
+                    if self.scroll_row > 0 {
+                        self.scroll_row -= 1;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
+                    }
+                } else if self.selected_row_index > 0 {
+                    self.selected_row_index -= 1;
+
+                    self.after_selection_up();
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
+                }
+            }
+            Event::KeyPress { key: Key::Home, alt: false, ctrl: false, shift: false } => {
+                if self.selected_row_index > 0 {
+                    self.selected_row_index = 0;
+
+                    self.after_selection_up();
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
+                }
+            }
+            &Event::KeyPress { key: Key::Down, alt, ctrl: false, shift: false } => {
+                if alt {
+                    if self.scroll_row < u32::MAX {
+                        let scroll_row = self.scroll_row;
+                        self.scroll_row += 1;
+                        self.clamp_scroll_row();
+                        if self.scroll_row != scroll_row {
+                            self.widget_data.dirty = true;
+                            return ActionFlags::Dirty;
+                        }
+                    }
+                } else if self.formatted_rows.is_empty() {
+                    if self.selected_row_index != 0 || self.scroll_row != 0 {
+                        self.selected_row_index = 0;
+                        self.scroll_row = 0;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
+                    }
+                } else if self.selected_row_index < self.formatted_rows.len() - 1 {
+                    self.selected_row_index += 1;
+                    self.after_selection_down();
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
+                }
+            }
+            Event::KeyPress { key: Key::End, alt: false, ctrl: false, shift: false } => {
+                if self.formatted_rows.is_empty() {
+                    if self.selected_row_index != 0 || self.scroll_row != 0 {
+                        self.selected_row_index = 0;
+                        self.scroll_row = 0;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
+                    }
+                } else if self.selected_row_index < self.formatted_rows.len() - 1 {
+                    self.selected_row_index = self.formatted_rows.len() - 1;
+                    self.after_selection_down();
+                    self.widget_data.dirty = true;
+                    return ActionFlags::Dirty;
+                }
+            }
+
+            Event::KeyPress { key: Key::PageUp, alt: false, ctrl: false, shift: false } => {
+                if self.header_height() >= self.widget_data.rect.height as usize {
+                    if self.scroll_row != 0 {
+                        self.scroll_row = 0;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
+                    }
+                } else if self.selected_row_index > 0 {
+                    let avail_height = self.widget_data.rect.height as usize - self.header_height();
+                    let mut body_height = 0;
+                    let mut selected_top = 0;
+
+                    for (index, row) in self.formatted_rows.iter().enumerate() {
+                        if index == self.selected_row_index {
+                            selected_top = body_height;
+                            break;
+                        }
+                        body_height += row.height();
+                    }
+
+                    let mut page_height = 0;
+                    let old_selected_top = selected_top;
+
+                    while page_height < avail_height && self.selected_row_index > 0 {
+                        self.selected_row_index -= 1;
+
+                        let row = &self.formatted_rows[self.selected_row_index];
+                        let selected_height = row.height();
+                        selected_top -= selected_height;
+                        page_height += selected_height;
+                    }
+
+                    let scroll_diff = old_selected_top - selected_top;
+                    if scroll_diff > self.scroll_row as usize {
+                        // can't happen
+                        if self.scroll_row != 0 {
+                            self.scroll_row = 0;
+                            self.widget_data.dirty = true;
+                            return ActionFlags::Dirty;
+                        }
+                    } else {
+                        self.scroll_row -= scroll_diff as u32;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
+                    }
+                }
+            }
+            Event::KeyPress { key: Key::PageDown, alt: false, ctrl: false, shift: false } => {
+                if self.header_height() >= self.widget_data.rect.height as usize {
+                    if self.scroll_row != 0 {
+                        self.scroll_row = 0;
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
+                    }
+                } else if self.selected_row_index < self.formatted_rows.len() {
+                    let avail_height = self.widget_data.rect.height as usize - self.header_height();
+                    let mut body_height = 0;
+                    let mut selected_top = 0;
+
+                    for (index, row) in self.formatted_rows.iter().enumerate() {
+                        if index == self.selected_row_index {
+                            selected_top = body_height;
+                            break;
+                        }
+                        body_height += row.height();
+                    }
+
+                    let mut page_height = 0;
+                    let old_selected_top = selected_top;
+
+                    while page_height < avail_height && self.selected_row_index + 1 < self.formatted_rows.len() {
+                        self.selected_row_index += 1;
+
+                        let row = &self.formatted_rows[self.selected_row_index];
+                        let selected_height = row.height();
+                        selected_top += selected_height;
+                        page_height += selected_height;
+                    }
+
+                    let scroll_diff = selected_top - old_selected_top;
+                    if scroll_diff > 0 {
+                        self.scroll_row += scroll_diff as u32;
+                        self.clamp_scroll_row();
+                        self.widget_data.dirty = true;
+                        return ActionFlags::Dirty;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        ActionFlags::None
     }
 
-    fn handle_message(&mut self, message: &mut crate::message::Message, broker: &mut crate::message::MessageBroker) -> crate::widget::ActionFlags {
-        unimplemented!()
+    fn handle_message(&mut self, message: &mut Message, broker: &mut crate::message::MessageBroker) -> ActionFlags {
+        if let Some(props) = message.consume_if(|props: &SetProperties| props.widget_id == self.widget_data.widget_id) {
+            self.rows = props.properties;
+            self.update();
+            return ActionFlags::Dirty;
+        }
+
+        ActionFlags::None
     }
 }
 
@@ -355,8 +629,8 @@ fn append_items(items: &mut Vec<PlainTextItem>, text: &str) -> usize {
 
 // TODO: draw cursor when editing
 fn format_row(key: &str, value: &str, key_width: usize, value_width: usize, formatted: &mut PlainText) -> usize {
-    let key = wrap(key, key_width).collect::<Vec<_>>();
-    let value = wrap(value, value_width).collect::<Vec<_>>();
+    let key = if key_width > 0 { wrap(key, key_width).collect::<Vec<_>>() } else { Vec::new() };
+    let value = if value_width > 0 { wrap(value, value_width).collect::<Vec<_>>() } else { Vec::new() };
 
     let max_lines = key.len().max(value.len()).max(1);
 
@@ -443,3 +717,10 @@ pub struct DeleteProperty {
     pub widget_id: WidgetId,
     pub row_index: usize,
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SetProperties {
+    pub widget_id: WidgetId,
+    pub properties: Vec<(String, String)>,
+}
+

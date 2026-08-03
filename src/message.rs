@@ -62,6 +62,25 @@ impl Message {
 
         temp.downcast::<T>().ok()
     }
+
+    #[inline]
+    pub fn consume_if<T, P>(&mut self, mut predicate: P) -> Option<Box<T>>
+    where T: Any, P: FnMut(&T) -> bool {
+        let Some(data) = self.data.as_ref().downcast_ref::<T>() else {
+            return None;
+        };
+
+        if !predicate(data) {
+            return None;
+        }
+
+        let mut temp: Box<dyn Any> = Box::new(Consumed);
+
+        std::mem::swap(&mut temp, &mut self.data);
+        self.stop_propergation();
+
+        temp.downcast::<T>().ok()
+    }
 }
 
 #[derive(Debug)]
