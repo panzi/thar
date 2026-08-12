@@ -221,6 +221,13 @@ impl Widget for App {
                     if view != self.active_view {
                         self.active_view = view;
 
+                        self.request_view.set_draw_rect(&Rect {
+                            row: 0,
+                            column: 0,
+                            width:  self.widget_data.rect.width,
+                            height: self.widget_data.rect.height,
+                        });
+
                         broker.dispatch(SetProperties {
                             widget_id: self.request_view.request_headers_id(),
                             properties: self.har.log.entries[row_index].request.headers.iter()

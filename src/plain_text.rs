@@ -416,11 +416,6 @@ impl PlainText {
 
         let lines = &lines[crop_row..crop_row_end];
 
-        termio.clear_style()?;
-
-        termio.fg_default()?;
-        termio.bg_default()?;
-
         let mut first = true;
         let mut prev_line_index = 0;
 

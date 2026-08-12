@@ -324,9 +324,13 @@ impl Widget for PropertyList {
                 );
 
                 let offset_body_height = body_height as i32 - scroll_row as i32;
+                let termio = scoped_state.termio_mut();
+
+                termio.fg_default()?;
+                termio.bg_default()?;
 
                 table_row.draw_cropped(
-                    scoped_state.termio_mut(),
+                    termio,
                     row + header_height as i32 + offset_body_height.max(0),
                     column,
                     -offset_body_height.min(0) as u32,
@@ -346,7 +350,7 @@ impl Widget for PropertyList {
                 };
             }
 
-            if body_height < avail_height as usize {
+            if avail_height > 0 {
                 let offset_body_height = body_height as i32 - scroll_row as i32;
                 let line_row = (row + header_height as i32 + offset_body_height.max(0)) as u32;
                 let line_column;
@@ -363,6 +367,9 @@ impl Widget for PropertyList {
                 let termio = scoped_state.termio_mut();
                 let window_width = termio.window_size().columns;
 
+                termio.fg_default()?;
+                termio.bg_default()?;
+
                 if line_column < window_width {
                     let line_width = if line_column + line_width > window_width {
                         window_width - line_column
@@ -371,7 +378,7 @@ impl Widget for PropertyList {
                     };
                     let repeat_count = line_width - 1;
 
-                    for line_index in 0..((avail_height as usize - body_height) as u32) {
+                    for line_index in 0..avail_height {
                         if line_index == 0 || line_column != 0 {
                             termio.move_cursor(line_row + line_index, column as u32)?;
                         } else {

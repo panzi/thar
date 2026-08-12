@@ -72,16 +72,20 @@ impl Tabs {
 
     #[inline]
     pub fn set_selected_tab_index(&mut self, index: usize) {
-        if index < self.tabs.len() && index != self.selected_tab_index {
+        if index < self.tabs.len() {
             let tab = &mut self.tabs[index];
+
             tab.content.set_draw_rect(&Rect {
                 row: self.widget_data.rect.row + 1,
                 height: if self.widget_data.rect.height > 0 { self.widget_data.rect.height - 1 } else { 0 },
                 ..self.widget_data.rect
             });
             tab.content.set_dirty(true);
-            self.selected_tab_index = index;
-            self.widget_data.dirty = true;
+
+            if index != self.selected_tab_index {
+                self.selected_tab_index = index;
+                self.widget_data.dirty = true;
+            }
         }
     }
 
@@ -149,7 +153,6 @@ impl Widget for Tabs {
                     height: if rect.height > 0 { rect.height - 1 } else { 0 },
                     ..*rect
                 });
-                tab.content.set_dirty(true);
             }
         }
     }
