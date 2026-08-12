@@ -17,7 +17,7 @@ pub struct Tabs {
 
 impl Tabs {
     #[inline]
-    pub fn new(tabs: impl Into<Vec<Tab>>) -> Self {
+    pub fn with_tabs(tabs: impl Into<Vec<Tab>>) -> Self {
         let mut tabs = Self {
             widget_data: WidgetData::new(),
             tabs: tabs.into(),
@@ -28,7 +28,78 @@ impl Tabs {
         tabs
     }
 
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            widget_data: WidgetData::new(),
+            tabs: Vec::new(),
+            formatted_tabs: Vec::new(),
+            selected_tab_index: 0,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.tabs.clear();
+        self.selected_tab_index = 0;
+        self.update();
+        self.widget_data.dirty = true;
+    }
+
+    pub fn add(&mut self, mut tab: Tab) {
+        tab.content.set_draw_rect(&Rect {
+            row: self.widget_data.rect.row + 1,
+            height: self.widget_data.rect.height.saturating_sub(1),
+            ..self.widget_data.rect
+        });
+        self.tabs.push(tab);
+        self.update();
+        self.widget_data.dirty = true;
+    }
+
+    pub fn extend(&mut self, tabs: impl IntoIterator<Item = Tab>) {
+        let index = self.tabs.len();
+        self.tabs.extend(tabs);
+        for tab in &mut self.tabs[index..] {
+            tab.content.set_draw_rect(&Rect {
+                row: self.widget_data.rect.row + 1,
+                height: self.widget_data.rect.height.saturating_sub(1),
+                ..self.widget_data.rect
+            });
+        }
+        self.update();
+        self.widget_data.dirty = true;
+    }
+
+    pub fn set_tabs(&mut self, tabs: impl Into<Vec<Tab>>) {
+        self.tabs = tabs.into();
+        for tab in &mut self.tabs {
+            tab.content.set_draw_rect(&Rect {
+                row: self.widget_data.rect.row + 1,
+                height: self.widget_data.rect.height.saturating_sub(1),
+                ..self.widget_data.rect
+            });
+        }
+        self.selected_tab_index = 0;
+        self.update();
+        self.widget_data.dirty = true;
+    }
+
+    pub fn set_content(&mut self, index: usize, content: Box<dyn Widget>) {
+        let tab = &mut self.tabs[index];
+        tab.content = content;
+        tab.content.set_draw_rect(&Rect {
+            row: self.widget_data.rect.row + 1,
+            height: self.widget_data.rect.height.saturating_sub(1),
+            ..self.widget_data.rect
+        });
+        tab.content.set_dirty(true);
+        self.update();
+        self.widget_data.dirty = true;
+    }
+
     fn update(&mut self) {
+        self.formatted_tabs.clear();
+
         let fg = Color::Color16(Color16::White);
         let bg = Color::Color16(Color16::Black);
 
@@ -77,7 +148,7 @@ impl Tabs {
 
             tab.content.set_draw_rect(&Rect {
                 row: self.widget_data.rect.row + 1,
-                height: if self.widget_data.rect.height > 0 { self.widget_data.rect.height - 1 } else { 0 },
+                height: self.widget_data.rect.height.saturating_sub(1),
                 ..self.widget_data.rect
             });
             tab.content.set_dirty(true);
@@ -104,6 +175,7 @@ impl Tabs {
         let mut tab_column = column;
         for (index, tab) in self.formatted_tabs.iter().enumerate() {
             if index != 0 {
+                termio.write_str(" ")?;
                 tab_column += 1;
             }
             termio.set_inverted(index == self.selected_tab_index);
@@ -150,7 +222,7 @@ impl Widget for Tabs {
             if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
                 tab.content.set_draw_rect(&Rect {
                     row: rect.row + 1,
-                    height: if rect.height > 0 { rect.height - 1 } else { 0 },
+                    height: rect.height.saturating_sub(1),
                     ..*rect
                 });
             }

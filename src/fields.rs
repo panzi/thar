@@ -1,4 +1,4 @@
-use crate::{char_width::CharWidth, color::Color, colorize::{colorize_json, colorize_sgml}, rich_text::{RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, styles::FIELD_ERROR_STYLE, table::{Align, ColumnDef}};
+use crate::{char_width::CharWidth, color::Color, colorize::{colorize_json, colorize_sgml}, mime_types::{is_json, is_sgml}, rich_text::{RichText, RichTextStyle}, schema::{Cache, CacheState, Content, Entry, Initiator, Page, PageTiming, Request, Response, Timings}, styles::FIELD_ERROR_STYLE, table::{Align, ColumnDef}};
 
 use std::{cmp::Ordering, fmt::Write, marker::PhantomData};
 
@@ -1051,11 +1051,9 @@ impl Field for ContentField {
                     if let Some(mime_type) = &content.mime_type {
                         let mime_type = mime_type.split(';').next().unwrap_or(&mime_type);
 
-                        if mime_type == "text/html" || mime_type.ends_with("+xml") {
-                            // TODO
-                            //rich_text.append_plain_text(text);
+                        if is_sgml(mime_type) {
                             colorize_sgml(text, rich_text);
-                        } else if mime_type == "application/json" || mime_type.ends_with("+json") {
+                        } else if is_json(mime_type) {
                             colorize_json(text, rich_text);
                         } else {
                             rich_text.append_plain_text(text);

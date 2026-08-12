@@ -66,7 +66,7 @@ impl App {
         requests_table.update();
         pages_table.update();
 
-        let tabs = Tabs::new([
+        let tabs = Tabs::with_tabs([
                 Tab {
                     title: "Requests".to_string(),
                     mnemonic: 'R',
@@ -228,12 +228,9 @@ impl Widget for App {
                             height: self.widget_data.rect.height,
                         });
 
-                        broker.dispatch(SetProperties {
-                            widget_id: self.request_view.request_headers_id(),
-                            properties: self.har.log.entries[row_index].request.headers.iter()
-                                .map(|header| (header.name.to_string(), header.value.to_string()))
-                                .collect::<Vec<_>>()
-                        });
+                        let entry = &self.har.log.entries[row_index];
+
+                        self.request_view.set_entry(entry);
 
                         return ActionFlags::Dirty;
                     } else {

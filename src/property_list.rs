@@ -45,9 +45,22 @@ impl PropertyList {
         &self.rows
     }
 
-    #[inline]
-    pub fn rows_mut(&mut self) -> &mut Vec<(String, String)> {
-        &mut self.rows
+    pub fn clear(&mut self) {
+        self.rows.clear();
+        self.widget_data.dirty = true;
+        self.update();
+    }
+
+    pub fn set_rows(&mut self, rows: impl Into<Vec<(String, String)>>) {
+        self.rows = rows.into();
+        self.widget_data.dirty = true;
+        self.update();
+    }
+
+    pub fn extend(&mut self, rows: impl IntoIterator<Item = (String, String)>) {
+        self.rows.extend(rows);
+        self.widget_data.dirty = true;
+        self.update();
     }
 
     #[inline]
@@ -82,7 +95,7 @@ impl PropertyList {
     }
 
     #[inline]
-    pub fn update(&mut self) {
+    fn update(&mut self) {
         self.preformat();
         self.postformat();
         self.widget_data.dirty = true;
@@ -562,6 +575,7 @@ impl Widget for PropertyList {
     fn handle_message(&mut self, message: &mut Message, broker: &mut crate::message::MessageBroker) -> ActionFlags {
         if let Some(props) = message.consume_if(|props: &SetProperties| props.widget_id == self.widget_data.widget_id) {
             self.rows = props.properties;
+            self.widget_data.dirty = true;
             self.update();
             return ActionFlags::Dirty;
         }

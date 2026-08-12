@@ -396,7 +396,7 @@ impl Widget for Table {
                 return Ok(());
             }
 
-            let &mut Table { scroll_row, scroll_column, selected_row_index, .. } = self;
+            let &mut Self { scroll_row, scroll_column, selected_row_index, .. } = self;
             let row    = row    + parent_row;
             let column = column + parent_column;
 
