@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::{message::MessageBroker, point::{Point, nest_into}, widget::{ActionFlags, Widget}};
+use crate::{message::MessageBroker, point::{Point, nest_into}, unicode::display_char, widget::{ActionFlags, Widget}};
 
 pub const ESCAPE: u8 = 0x1B;
 
@@ -331,11 +331,7 @@ impl std::fmt::Display for Key {
             Self::Char('\t') => f.write_str("Tab"),
             Self::Char(ch) => {
                 if ch.is_ascii_control() {
-                    if ch == '\x7F' {
-                        f.write_char('\u{2421}')?;
-                    } else {
-                        f.write_char(unsafe { char::from_u32_unchecked(0x2400 + ch as u32) })?;
-                    }
+                    f.write_char(display_char(ch))?;
                 } else {
                     let upper = ch.to_uppercase();
                     if upper.len() == 1 {

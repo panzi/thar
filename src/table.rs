@@ -269,7 +269,7 @@ impl Table {
         &mut self.columns
     }
 
-    pub fn clamp_scroll_row(&mut self) {
+    fn clamp_scroll_row(&mut self) {
         let height = self.height();
         if self.widget_data.rect.height as usize > height {
             self.scroll_row = 0;
@@ -282,7 +282,7 @@ impl Table {
         }
     }
 
-    pub fn clamp_scroll_column(&mut self) {
+    fn clamp_scroll_column(&mut self) {
         if self.widget_data.rect.width as usize > self.width {
             self.scroll_column = 0;
         } else {

@@ -37,7 +37,7 @@ A last line.".to_string()
     {
         let mut plain_text = plain_text.clone();
         plain_text.append(&format!("\nrow: {row}, column: {column}"));
-        plain_text.draw(&mut termio, row, column)?;
+        plain_text.draw(&mut termio, row, column, &None)?;
         termio.flush()?;
     }
 
@@ -71,7 +71,7 @@ A last line.".to_string()
         termio.flush()?;
         let mut plain_text = plain_text.clone();
         plain_text.append(&format!("\nrow: {row}, column: {column}"));
-        plain_text.draw(&mut termio, row, column)?;
+        plain_text.draw(&mut termio, row, column, &None)?;
         termio.flush()?;
     }
 

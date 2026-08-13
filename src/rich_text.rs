@@ -1,4 +1,4 @@
-use crate::{ansi_codes::{write_bg, write_fg}, char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, Style, TextDecoration}, styles::{CONTROL_STYLE, DEFAULT_STYLE}, termio::TermIO, wrap::LineWrapper};
+use crate::{ansi_codes::{write_bg, write_fg}, char_width::{CharWidth, crop}, color::{Color, Color16}, style::{FontStyle, FontWeight, Style, TextDecoration}, styles::{CONTROL_STYLE, DEFAULT_STYLE}, termio::TermIO, unicode::display_char, wrap::LineWrapper};
 
 use bitflags::bitflags;
 
@@ -229,11 +229,7 @@ impl RichText {
                         line_width += 1;
                         style.diff(&CONTROL_STYLE, &mut line);
                         line.push(RichTextCode::Text {
-                            text: if ch == '\x7F' {
-                                "\u{2421}".to_string()
-                            } else {
-                                unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }.to_string()
-                            },
+                            text: display_char(ch).to_string(),
                             width: 1,
                         });
                         CONTROL_STYLE.diff(style, &mut line);
@@ -482,11 +478,7 @@ impl RichText {
                         line_width += 1;
                         current_style.diff(&CONTROL_STYLE, &mut line);
                         line.push(RichTextCode::Text {
-                            text: if ch == '\x7F' {
-                                "\u{2421}".to_string()
-                            } else {
-                                unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }.to_string()
-                            },
+                            text: display_char(ch).to_string(),
                             width: 1,
                         });
                         CONTROL_STYLE.diff(&current_style, &mut line);

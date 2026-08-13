@@ -296,6 +296,7 @@ impl Widget for PropertyList {
                     0,
                     width,
                     height,
+                    &None,
                 );
 
                 scoped_state.termio_mut().font_weight(FontWeight::Normal)?;
@@ -350,6 +351,7 @@ impl Widget for PropertyList {
                     0,
                     width,
                     avail_height,
+                    &None,
                 )?;
 
                 current_row_index += 1;

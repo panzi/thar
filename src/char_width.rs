@@ -204,3 +204,21 @@ pub fn crop(text: &str, start_width: usize, end_width: usize) -> &str {
 
     &text[start_index..end_index]
 }
+
+pub fn split_at(text: &str, width: usize) -> (&str, &str) {
+    if width == 0 {
+        return ("", text);
+    }
+
+    let mut text_width = 0;
+
+    for (index, ch) in text.char_indices() {
+        text_width += if ch.is_ascii_control() { 1 } else { ch.char_width_ignore_unprintable() };
+
+        if text_width > width {
+            return (&text[..index], &text[index..]);
+        }
+    }
+
+    (text, "")
+}

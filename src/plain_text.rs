@@ -1,4 +1,6 @@
-use crate::{char_width::{CharWidth, crop}, styles::{CONTROL_STYLE, DEFAULT_STYLE}, termio::TermIO, wrap::find_wrap_point};
+use std::io::Write;
+
+use crate::{char_width::{CharWidth, crop, split_at}, styles::{CONTROL_STYLE, DEFAULT_STYLE}, termio::TermIO, unicode::display_char, wrap::find_wrap_point};
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,20 +238,21 @@ impl PlainText {
         let wrap_width = wrap_width.max(1);
 
         if self.width <= wrap_width {
+            // implicitly handles case if self.lines.is_empty()
             return self.clone();
         }
 
         let mut line_width = 0;
         let mut lines = Vec::with_capacity(self.lines.len());
         let mut width = 0;
+        let mut new_line = lines.push_mut(Vec::new());
 
         for line in &self.lines {
-            let mut new_line = lines.push_mut(Vec::with_capacity(line.len()));
-
             for item in line {
                 match item {
                     &PlainTextItem::Newline => {
                         new_line.push(PlainTextItem::Newline);
+                        new_line = lines.push_mut(Vec::new());
                     }
                     &PlainTextItem::Special(ch) => {
                         if line_width + 1 > wrap_width {
@@ -322,21 +325,26 @@ impl PlainText {
             }
         }
 
+        if new_line.is_empty() {
+            lines.pop();
+        }
+
         Self { lines, width }
     }
 
     #[inline]
-    pub fn draw(&self, termio: &mut TermIO, row: i32, column: i32) -> std::io::Result<()> {
+    pub fn draw(&self, termio: &mut TermIO, row: i32, column: i32, cursor: &Option<Cursor>) -> std::io::Result<()> {
         self.draw_cropped(
             termio,
             row, column,
             0, 0,
             self.width.min(u32::MAX as usize) as u32,
             self.height().min(u32::MAX as usize) as u32,
+            cursor,
         )
     }
 
-    pub fn draw_cropped(&self, termio: &mut TermIO, row: i32, column: i32, crop_row: u32, crop_column: u32, crop_width: u32, crop_height: u32) -> std::io::Result<()> {
+    pub fn draw_cropped(&self, termio: &mut TermIO, row: i32, column: i32, crop_row: u32, crop_column: u32, crop_width: u32, crop_height: u32, cursor: &Option<Cursor>) -> std::io::Result<()> {
         let lines = &self.lines;
 
         let mut crop_row = crop_row as usize;
@@ -358,6 +366,12 @@ impl PlainText {
         if crop_column >= crop_column_end {
             return Ok(());
         }
+
+        let (cursor_row, cursor_column) = if let &Some(Cursor { row, column }) = cursor {
+            (row as usize, column as usize)
+        } else {
+            (usize::MAX, usize::MAX)
+        };
 
         let window_size = *termio.window_size();
 
@@ -422,6 +436,7 @@ impl PlainText {
         for (line_index, line) in lines.iter().enumerate() {
             let mut moved = false;
             let mut line_width = 0;
+            let row = line_index + crop_row;
 
             for code in line {
                 if !moved {
@@ -437,24 +452,44 @@ impl PlainText {
 
                 match code {
                     &PlainTextItem::Special(ch) => {
-                        let display_char = if ch == '\x7F' {
-                            '\u{2421}'
-                        } else {
-                            unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }
-                        };
-
                         if line_width >= crop_column && line_width + 1 < crop_column_end {
                             DEFAULT_STYLE.write_diff(&CONTROL_STYLE, termio)?;
-                            termio.write_str(display_char.encode_utf8(&mut [0; char::MAX_LEN_UTF8]))?;
+                            let mut buf = [0; char::MAX_LEN_UTF8];
+                            let text = display_char(ch).encode_utf8(&mut buf);
+
+                            let draw_cursor = row == cursor_row && line_width == cursor_column;
+                            if draw_cursor {
+                                termio.invert();
+                            }
+                            termio.write_str(text)?;
+                            if draw_cursor {
+                                termio.invert();
+                            }
                             CONTROL_STYLE.write_diff(&DEFAULT_STYLE, termio)?;
                         }
 
                         line_width += 1;
                     }
                     PlainTextItem::Text { text, width: text_width } => {
+                        // TODO: draw cursor
                         let text_width = *text_width;
+                        let draw_cursor = row == cursor_row && line_width <= cursor_column && line_width + text_width < cursor_column;
+
                         if line_width >= crop_column && line_width + text_width <= crop_column_end {
-                            termio.write_str(text)?;
+                            if draw_cursor {
+                                let (head, tail) = split_at(text, cursor_column - line_width);
+
+                                termio.write_str(head)?;
+                                termio.invert();
+
+                                let (head, tail) = split_at(tail, 1);
+                                termio.write_str(head)?;
+                                termio.invert();
+
+                                termio.write_str(tail)?;
+                            } else {
+                                termio.write_str(text)?;
+                            }
                         } else if line_width + text_width >= crop_column && line_width < crop_column_end {
                             let text_column = if line_width >= crop_column { 0 } else { crop_column - line_width };
                             let text_column_end = crop_column_end - line_width;
@@ -464,7 +499,23 @@ impl PlainText {
                                     text_column,
                                     text_column_end,
                                 );
-                                termio.write_str(text)?;
+
+                                let sub_width = line_width + text_column;
+
+                                if draw_cursor && sub_width >= cursor_column {
+                                    let (head, tail) = split_at(text, cursor_column - sub_width);
+
+                                    termio.write_str(head)?;
+                                    termio.invert();
+
+                                    let (head, tail) = split_at(tail, 1);
+                                    termio.write_str(head)?;
+                                    termio.invert();
+
+                                    termio.write_str(tail)?;
+                                } else {
+                                    termio.write_str(text)?;
+                                }
                             }
                         }
 
@@ -474,6 +525,24 @@ impl PlainText {
                         /* Only exists to distinquish wrapped lines from actual lines. */
                     }
                 }
+            }
+
+            if cursor_row == row && cursor_column == line_width && line_width < full_column_end {
+                if !moved {
+                    if !first && term_column == 0 && prev_line_index + 1 == line_index {
+                        termio.write_str("\n")?;
+                    } else {
+                        first = false;
+                        termio.move_cursor(term_row + line_index as u32, term_column)?;
+                    }
+                    moved = true;
+                    prev_line_index = line_index;
+                }
+
+                termio.invert();
+                termio.write(b" ")?;
+                termio.invert();
+                line_width += 1;
             }
 
             if line_width < full_column_end {
@@ -500,14 +569,8 @@ impl PlainText {
             for item in line {
                 match item {
                     &PlainTextItem::Special(ch) => {
-                        let display_char = if ch == '\x7F' {
-                            '\u{2421}'
-                        } else {
-                            unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }
-                        };
-
                         DEFAULT_STYLE.write_diff(&CONTROL_STYLE, write)?;
-                        write.write_all(display_char.encode_utf8(&mut [0; char::MAX_LEN_UTF8]).as_bytes())?;
+                        write.write_all(display_char(ch).encode_utf8(&mut [0; char::MAX_LEN_UTF8]).as_bytes())?;
                         CONTROL_STYLE.write_diff(&DEFAULT_STYLE, write)?;
                     }
                     PlainTextItem::Text { text, .. } => {
@@ -524,18 +587,33 @@ impl PlainText {
         Ok(())
     }
 
-    pub fn write(&self, buf: &mut String) {
+    pub fn write(&self, write: &mut impl Write) -> std::io::Result<()> {
+        let mut buf = [0; char::MAX_LEN_UTF8];
+        for line in &self.lines {
+            for item in line {
+                match item {
+                    PlainTextItem::Text { text, .. } => {
+                        write.write_all(text.as_bytes())?;
+                    }
+                    PlainTextItem::Newline => {
+                        write.write_all(b"\n")?;
+                    }
+                    PlainTextItem::Special(ch) => {
+                        write.write_all(ch.encode_utf8(&mut buf).as_bytes())?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn write_to_string(&self, buf: &mut String) {
         for line in &self.lines {
             for item in line {
                 match item {
                     &PlainTextItem::Special(ch) => {
-                        let display_char = if ch == '\x7F' {
-                            '\u{2421}'
-                        } else {
-                            unsafe { char::from_u32_unchecked(0x2400 + ch as u32) }
-                        };
-
-                        buf.push(display_char);
+                        buf.push(display_char(ch));
                     }
                     PlainTextItem::Text { text, .. } => {
                         buf.push_str(text);
@@ -547,6 +625,34 @@ impl PlainText {
             }
             buf.push('\n');
         }
+    }
+
+    pub fn insert(&mut self, cursor: &Cursor, text: &str) -> Cursor {
+        if cursor.row as usize > self.lines.len() {
+            self.append(text);
+
+            if self.lines.is_empty() {
+                return Cursor::default();
+            }
+
+            let index = self.lines.len() - 1;
+            return Cursor {
+                row: index as u32,
+                column: line_width(&self.lines[index]) as u32,
+            }
+        } else {
+            // TODO
+        }
+
+        unimplemented!()
+    }
+
+    pub fn delete(&mut self, cursor: &Cursor) -> Cursor {
+        unimplemented!()
+    }
+
+    pub fn backspace(&mut self, cursor: &Cursor) -> Cursor {
+        unimplemented!()
     }
 
     /// Number of bytes that will be written by [Self::write()].
@@ -616,10 +722,16 @@ impl PlainText {
     pub fn to_string(&self) -> String {
         let mut buf = String::with_capacity(self.write_len());
 
-        self.write(&mut buf);
+        self.write_to_string(&mut buf);
 
         buf
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Cursor {
+    pub row: u32,
+    pub column: u32,
 }
 
 pub fn line_width(line: &[PlainTextItem]) -> usize {

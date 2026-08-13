@@ -16,6 +16,7 @@ pub mod styles;
 pub mod rich_text;
 pub mod plain_text;
 pub mod rich_text_view;
+pub mod text_editor;
 pub mod fields;
 pub mod table;
 pub mod widget;
@@ -31,6 +32,7 @@ pub mod colorize;
 pub mod ansi_codes;
 pub mod wrap;
 pub mod mime_types;
+pub mod unicode;
 
 #[derive(Parser)]
 struct Args {
