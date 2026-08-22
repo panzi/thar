@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::{char_width::{CharWidth, crop, split_at}, styles::{CONTROL_STYLE, DEFAULT_STYLE}, termio::TermIO, unicode::display_char, wrap::find_wrap_point};
+use crate::{char_width::{CharWidth, crop}, styles::{CONTROL_STYLE, DEFAULT_STYLE}, termio::TermIO, unicode::display_char, wrap::find_wrap_point};
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +18,20 @@ impl PlainTextItem {
             PlainTextItem::Special(..) => 1,
             PlainTextItem::Text { width, .. } => *width,
         }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            PlainTextItem::Newline => 1,
+            PlainTextItem::Special(..) => 1,
+            PlainTextItem::Text { text, .. } => text.len(),
+        }
+    }
+
+    #[inline]
+    pub fn is_text(&self) -> bool {
+        matches!(self, PlainTextItem::Text { .. })
     }
 }
 
@@ -235,12 +249,11 @@ impl PlainText {
     }
 
     pub fn wrap(&self, wrap_width: usize) -> Self {
-        let wrap_width = wrap_width.max(1);
-
-        if self.width <= wrap_width {
-            // implicitly handles case if self.lines.is_empty()
+        if self.lines.is_empty() {
             return self.clone();
         }
+
+        let wrap_width = wrap_width.max(1);
 
         let mut line_width = 0;
         let mut lines = Vec::with_capacity(self.lines.len());
@@ -332,6 +345,33 @@ impl PlainText {
         Self { lines, width }
     }
 
+    pub fn wrap_inplace(&mut self, wrap_width: usize) {
+        if self.lines.is_empty() || self.width == wrap_width {
+            return;
+        }
+
+        let wrap_width = wrap_width.max(1);
+
+        let mut line_width = 0;
+        let mut width = 0;
+
+        let mut src_line_index = 0;
+        let mut src_item_index = 0;
+
+        let mut dest_line_index = 0;
+        let mut dest_item_index = 0;
+
+        if self.width < wrap_width {
+            
+        } else {
+
+        }
+
+        // TODO
+
+        unimplemented!()
+    }
+
     #[inline]
     pub fn draw(&self, termio: &mut TermIO, row: i32, column: i32, cursor: &Option<Cursor>) -> std::io::Result<()> {
         self.draw_cropped(
@@ -367,8 +407,8 @@ impl PlainText {
             return Ok(());
         }
 
-        let (cursor_row, cursor_column) = if let &Some(Cursor { row, column }) = cursor {
-            (row as usize, column as usize)
+        let (cursor_line_index, cursor_byte_index) = if let &Some(Cursor { line_index, byte_index }) = cursor {
+            (line_index, byte_index)
         } else {
             (usize::MAX, usize::MAX)
         };
@@ -436,6 +476,7 @@ impl PlainText {
         for (line_index, line) in lines.iter().enumerate() {
             let mut moved = false;
             let mut line_width = 0;
+            let mut line_len = 0;
             let row = line_index + crop_row;
 
             for code in line {
@@ -457,7 +498,7 @@ impl PlainText {
                             let mut buf = [0; char::MAX_LEN_UTF8];
                             let text = display_char(ch).encode_utf8(&mut buf);
 
-                            let draw_cursor = row == cursor_row && line_width == cursor_column;
+                            let draw_cursor = row == cursor_line_index && line_len == cursor_byte_index;
                             if draw_cursor {
                                 termio.invert();
                             }
@@ -469,24 +510,28 @@ impl PlainText {
                         }
 
                         line_width += 1;
+                        line_len += 1;
                     }
                     PlainTextItem::Text { text, width: text_width } => {
                         // TODO: draw cursor
                         let text_width = *text_width;
-                        let draw_cursor = row == cursor_row && line_width <= cursor_column && line_width + text_width < cursor_column;
+                        let draw_cursor = row == cursor_line_index && line_len <= cursor_byte_index && line_len + text.len() < cursor_byte_index;
 
                         if line_width >= crop_column && line_width + text_width <= crop_column_end {
                             if draw_cursor {
-                                let (head, tail) = split_at(text, cursor_column - line_width);
+                                let (head, tail) = text.split_at(cursor_byte_index - line_len);
 
                                 termio.write_str(head)?;
-                                termio.invert();
 
-                                let (head, tail) = split_at(tail, 1);
-                                termio.write_str(head)?;
-                                termio.invert();
+                                if !tail.is_empty() {
+                                    termio.invert();
 
-                                termio.write_str(tail)?;
+                                    let (head, tail) = tail.split_at(1);
+                                    termio.write_str(head)?;
+                                    termio.invert();
+
+                                    termio.write_str(tail)?;
+                                }
                             } else {
                                 termio.write_str(text)?;
                             }
@@ -500,19 +545,22 @@ impl PlainText {
                                     text_column_end,
                                 );
 
-                                let sub_width = line_width + text_column;
+                                let sub_len = line_len + text_column;
 
-                                if draw_cursor && sub_width >= cursor_column {
-                                    let (head, tail) = split_at(text, cursor_column - sub_width);
+                                if draw_cursor && sub_len >= cursor_byte_index {
+                                    let (head, tail) = text.split_at(cursor_byte_index - sub_len);
 
                                     termio.write_str(head)?;
-                                    termio.invert();
 
-                                    let (head, tail) = split_at(tail, 1);
-                                    termio.write_str(head)?;
-                                    termio.invert();
+                                    if !tail.is_empty() {
+                                        termio.invert();
 
-                                    termio.write_str(tail)?;
+                                        let (head, tail) = tail.split_at(1);
+                                        termio.write_str(head)?;
+                                        termio.invert();
+
+                                        termio.write_str(tail)?;
+                                    }
                                 } else {
                                     termio.write_str(text)?;
                                 }
@@ -520,14 +568,16 @@ impl PlainText {
                         }
 
                         line_width += text_width;
+                        line_len += text.len();
                     }
                     PlainTextItem::Newline => {
                         /* Only exists to distinquish wrapped lines from actual lines. */
+                        line_len += 1;
                     }
                 }
             }
 
-            if cursor_row == row && cursor_column == line_width && line_width < full_column_end {
+            if cursor_line_index == row && cursor_byte_index == line_width && line_width < full_column_end {
                 if !moved {
                     if !first && term_column == 0 && prev_line_index + 1 == line_index {
                         termio.write_str("\n")?;
@@ -628,7 +678,7 @@ impl PlainText {
     }
 
     pub fn insert(&mut self, cursor: &Cursor, text: &str) -> Cursor {
-        if cursor.row as usize > self.lines.len() {
+        if cursor.line_index >= self.lines.len() {
             self.append(text);
 
             if self.lines.is_empty() {
@@ -637,11 +687,15 @@ impl PlainText {
 
             let index = self.lines.len() - 1;
             return Cursor {
-                row: index as u32,
-                column: line_width(&self.lines[index]) as u32,
+                line_index: index,
+                byte_index: line_len(&self.lines[index]),
             }
         } else {
             // TODO
+            let mut line_index = cursor.line_index;
+            let newline_index = text.find('\n');
+
+
         }
 
         unimplemented!()
@@ -730,8 +784,11 @@ impl PlainText {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Cursor {
-    pub row: u32,
-    pub column: u32,
+    pub line_index: usize,
+
+    /// Needs to be byte index and not character width to be
+    /// able to move past a zero-width character.
+    pub byte_index: usize,
 }
 
 pub fn line_width(line: &[PlainTextItem]) -> usize {
@@ -742,6 +799,16 @@ pub fn line_width(line: &[PlainTextItem]) -> usize {
     }
 
     line_width
+}
+
+pub fn line_len(line: &[PlainTextItem]) -> usize {
+    let mut line_len = 0;
+
+    for item in line {
+        line_len += item.len();
+    }
+
+    line_len
 }
 
 impl From<&str> for PlainText {

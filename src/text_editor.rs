@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::{event::{Event, Key}, message::MessageBroker, plain_text::{Cursor, PlainText, PlainTextItem, line_width}, rect::Rect, termio::TermIO, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
+use crate::{event::{Event, Key}, message::MessageBroker, plain_text::{Cursor, PlainText, line_len}, rect::Rect, termio::TermIO, widget::{ActionFlags, Widget, WidgetData, WidgetId}};
 
 #[derive(Debug)]
 pub struct TextEditor {
@@ -26,9 +26,9 @@ impl TextEditor {
     #[inline]
     pub fn with_text(text: &str) -> Self {
         let text = PlainText::parse(text);
-        let cursor_row = text.height().saturating_sub(1) as u32;
-        let cursor_column = if text.height() > 0 {
-            line_width(&text.lines()[cursor_row as usize]) as u32
+        let cursor_line_index = text.height().saturating_sub(1);
+        let cursor_byte_index = if text.height() > 0 {
+            line_len(&text.lines()[cursor_line_index])
         } else {
             0
         };
@@ -39,8 +39,8 @@ impl TextEditor {
             scroll_row: 0,
             scroll_column: 0,
             cursor: Cursor {
-                row: cursor_row,
-                column: cursor_column,
+                line_index: cursor_line_index,
+                byte_index: cursor_byte_index,
             }
         }
     }
@@ -79,21 +79,22 @@ impl TextEditor {
         let height = self.text.height();
 
         if height == 0 {
-            self.cursor.row = 0;
-            self.cursor.column = 0;
+            self.cursor.line_index = 0;
+            self.cursor.byte_index = 0;
         } else {
-            if self.cursor.row as usize >= height {
-                self.cursor.row = (height - 1) as u32;
+            if self.cursor.line_index >= height {
+                self.cursor.line_index = height - 1;
             }
 
-            let width = line_width(&self.text.lines()[self.cursor.row as usize]);
-            if self.cursor.column as usize > width {
-                self.cursor.column = width as u32;
+            let len = line_len(&self.text.lines()[self.cursor.line_index]);
+            if self.cursor.byte_index > len {
+                self.cursor.byte_index = len;
             }
         }
     }
 
     pub fn update(&mut self) {
+        // XXX: Very inefficient to reallocate everything on every keypress.
         self.text = self.text.wrap(self.widget_data.rect.width as usize);
     }
 
@@ -146,8 +147,8 @@ impl Widget for TextEditor {
             self.widget_data.rect.width,
             self.widget_data.rect.height,
             &Some(Cursor {
-                row: self.cursor.row,
-                column: self.cursor.column
+                line_index: self.cursor.line_index,
+                byte_index: self.cursor.byte_index,
             })
         )
     }
